@@ -180,4 +180,42 @@ st.markdown("---")
 # --- Generation Controls ---
 col3, col4, col5 = st.columns([1, 1, 2])
 with col3:
-    target_year = st.number_input("Target Year", min_value=2024, max_value=
+    target_year = st.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
+with col4:
+    target_month = st.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
+with col5:
+    st.write("") 
+    st.write("") 
+    generate_btn = st.button("🚀 Generate Schedule", type="primary", use_container_width=True)
+
+# --- Execution Logic ---
+if generate_btn:
+    with st.spinner("Calculating optimal schedule..."):
+        # Use the edited data from the UI
+        st.session_state.catalog_data = df_catalog
+        st.session_state.roster_data = df_roster
+        st.session_state.timeoff_data = df_timeoff
+        st.session_state.locations_data = df_locations
+
+        schedule_df, warnings = generate_training_schedule(
+            df_catalog, df_roster, df_timeoff, df_locations, target_year, target_month
+        )
+        
+        if not schedule_df.empty:
+            st.success(f"✅ Schedule successfully generated for {calendar.month_name[target_month]} {target_year}!")
+            for w in warnings:
+                st.warning(w)
+                
+            st.dataframe(schedule_df, use_container_width=True, hide_index=True)
+            
+            csv = schedule_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Schedule as CSV",
+                data=csv,
+                file_name=f"Training_Schedule_{target_year}_{target_month}.csv",
+                mime="text/csv",
+            )
+        else:
+            for w in warnings:
+                st.error(w)
+
