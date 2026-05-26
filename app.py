@@ -16,7 +16,6 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
     
-    # Process dates safely
     time_off_df['StartDate'] = pd.to_datetime(time_off_df['Start Date']).dt.date
     time_off_df['EndDate'] = pd.to_datetime(time_off_df['End Date']).dt.date
 
@@ -27,7 +26,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
 
     workdays = [d for d in month_days if d.weekday() < 5 and d not in general_holidays]
     if not workdays:
-        return pd.DataFrame(), "No available workdays found for the selected month."
+        return pd.DataFrame(), ["No available workdays found for the selected month."]
 
     location_availability = defaultdict(list)
     instructor_availability = defaultdict(list)
@@ -52,7 +51,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             duration_hours = float(class_details['Duration'])
             default_location = class_details['Default Location']
         except (IndexError, ValueError):
-            warnings.append(f"Warning: Could not find details or valid duration for class '{class_name}'.")
+            warnings.append(f"Could not find details or valid duration for class '{class_name}'.")
             continue
             
         qualified_instructors = instructor_roster_df[instructor_roster_df['QualifiedClasses'].str.contains(class_name, na=False)]
@@ -70,7 +69,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 start_time = datetime.combine(test_date, datetime.min.time()).replace(hour=start_hour, minute=start_minute)
                 end_time = start_time + timedelta(hours=duration_hours)
 
-                if any(check_overlap(start_time, end_time, bs, be) for bs, be in location_availability[default_location]):
+                if any(check_overlap(start_time, end_time, bs, be) for bs, be in location_availability.get(default_location, [])):
                     continue
 
                 for _, instructor in qualified_instructors.iterrows():
@@ -84,7 +83,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     ].empty
                     if is_on_leave: continue
 
-                    if not any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability[instructor_name]):
+                    if not any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                         final_schedule.append({
                             'Date': test_date,
                             'Start Time': start_time.strftime('%I:%M %p'),
@@ -99,10 +98,10 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                         break 
                 if session_scheduled: break
         if not session_scheduled:
-            warnings.append(f"Warning: Could not find an available slot for '{class_name}'.")
+            warnings.append(f"Could not find an available slot for '{class_name}'.")
 
     if not final_schedule:
-        return pd.DataFrame(), "Could not generate a schedule. Please check constraints."
+        return pd.DataFrame(), warnings if warnings else ["Could not generate a schedule with the given constraints."]
 
     df = pd.DataFrame(final_schedule)
     df['Date_sort'] = pd.to_datetime(df['Date'])
@@ -127,10 +126,10 @@ st.sidebar.markdown("---")
 st.sidebar.header("2. Upload SharePoint Data")
 st.sidebar.markdown("Export these lists as CSV from SharePoint and upload them here.")
 
-class_file = st.sidebar.file_input("Upload Class Catalog.csv", type=["csv"])
-roster_file = st.sidebar.file_input("Upload Instructor Roster.csv", type=["csv"])
-timeoff_file = st.sidebar.file_input("Upload Time Off and Holidays.csv", type=["csv"])
-locations_file = st.sidebar.file_input("Upload Locations.csv", type=["csv"])
+class_file = st.sidebar.file_input("Upload Class Catalog.csv", type="csv")
+roster_file = st.sidebar.file_input("Upload Instructor Roster.csv", type="csv")
+timeoff_file = st.sidebar.file_input("Upload Time Off and Holidays.csv", type="csv")
+locations_file = st.sidebar.file_input("Upload Locations.csv", type="csv")
 
 # Main Area Logic
 if st.button("🚀 Generate Schedule", type="primary"):
@@ -139,13 +138,11 @@ if st.button("🚀 Generate Schedule", type="primary"):
     else:
         with st.spinner("Calculating optimal schedule..."):
             try:
-                # Read the uploaded files into DataFrames
                 df_catalog = pd.read_csv(class_file)
                 df_roster = pd.read_csv(roster_file)
                 df_timeoff = pd.read_csv(timeoff_file)
                 df_locations = pd.read_csv(locations_file)
                 
-                # Run the engine
                 schedule_df, warnings = generate_training_schedule(
                     df_catalog, df_roster, df_timeoff, df_locations, target_year, target_month
                 )
@@ -153,14 +150,11 @@ if st.button("🚀 Generate Schedule", type="primary"):
                 if not schedule_df.empty:
                     st.success(f"✅ Schedule successfully generated for {calendar.month_name[target_month]} {target_year}!")
                     
-                    # Display Warnings if any
                     for w in warnings:
                         st.warning(w)
                         
-                    # Display the Table
                     st.dataframe(schedule_df, use_container_width=True, hide_index=True)
                     
-                    # Download Button
                     csv = schedule_df.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         label="📥 Download Schedule as CSV",
@@ -169,7 +163,8 @@ if st.button("🚀 Generate Schedule", type="primary"):
                         mime="text/csv",
                     )
                 else:
-                    st.error(warnings) # Print the specific error message
+                    for w in warnings:
+                        st.error(w)
             except Exception as e:
                 st.error(f"An error occurred while processing the files: {e}")
 else:
