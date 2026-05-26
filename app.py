@@ -5,17 +5,27 @@ import calendar
 from datetime import datetime, timedelta
 import random
 
-# --- Helper Functions (Same as before) ---
+# --- Helper Functions ---
 def check_overlap(start1, end1, start2, end2):
+    """Checks if two time intervals overlap."""
     return max(start1, start2) < min(end1, end2)
 
 def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, target_year, target_month):
+    """Core scheduling logic with instructor randomization."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
     
-    time_off_df['StartDate'] = pd.to_datetime(time_off_df['Start Date']).dt.date
-    time_off_df['EndDate'] = pd.to_datetime(time_off_df['End Date']).dt.date
+    # Safely handle date conversion
+    try:
+        time_off_df['StartDate'] = pd.to_datetime(time_off_df['Start Date']).dt.date
+        time_off_df['EndDate'] = pd.to_datetime(time_off_df['End Date']).dt.date
+    except Exception:
+        # Handle cases where dates might be in a different format or invalid
+        time_off_df['StartDate'] = pd.to_datetime(time_off_df['Start Date'], errors='coerce').dt.date
+        time_off_df['EndDate'] = pd.to_datetime(time_off_df['End Date'], errors='coerce').dt.date
+        time_off_df.dropna(subset=['StartDate', 'EndDate'], inplace=True)
+
 
     general_holidays = set()
     for _, row in time_off_df[time_off_df['Instructor'].isnull() | (time_off_df['Instructor'] == '')].iterrows():
@@ -52,12 +62,17 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             warnings.append(f"Could not find details or valid duration for class '{class_name}'.")
             continue
             
-        qualified_instructors = instructor_roster_df[instructor_roster_df['QualifiedClasses'].str.contains(class_name, na=False)]
+        qualified_instructors = instructor_roster_df[instructor_roster_df['QualifiedClasses'].str.contains(class_name, na=False)].copy()
+        
+        # --- KEY IMPROVEMENT: Shuffle the list of instructors ---
+        qualified_instructors = qualified_instructors.sample(frac=1).reset_index(drop=True)
+
         shuffled_workdays = workdays.copy()
         random.shuffle(shuffled_workdays)
 
         for test_date in shuffled_workdays:
             if session_scheduled: break
+            
             preferred_start_times = [(9, 0), (10, 0), (13, 0), (14, 0)]
             random.shuffle(preferred_start_times)
 
@@ -114,28 +129,27 @@ st.title("📅 TLC Monthly Training Scheduler")
 st.markdown("Edit your class requirements and instructor availability below, then click generate.")
 
 # --- Initialize Default Data in Session State ---
-# This keeps the data editable without resetting when you click buttons
 if 'catalog_data' not in st.session_state:
     st.session_state.catalog_data = pd.DataFrame({
-        "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible"],
-        "Frequency": [1, 1, 2, 1, 1, 1, 2, 2],
-        "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0],
-        "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835"]
+        "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps"],
+        "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1],
+        "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5],
+        "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "SHB 835"]
     })
 
 if 'roster_data' not in st.session_state:
     st.session_state.roster_data = pd.DataFrame({
-        "Title": ["Jeb", "Joel", "Lisa", "Ryan"],
-        "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov"],
-        "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams", "CapCentral, Texas Leg Apps", "CapCentral, TLIS", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible"]
+        "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
+        "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"],
+        "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams, Outlook, Excel Formulas", "CapCentral, Texas Leg Apps", "CapCentral, TLIS, Word, Excel, Outlook", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible", "TLIS, CMS, Texas Leg Apps"]
     })
 
 if 'timeoff_data' not in st.session_state:
     st.session_state.timeoff_data = pd.DataFrame({
-        "Title": ["Juneteenth (Example)"],
-        "Start Date": ["2026-06-19"],
-        "End Date": ["2026-06-19"],
-        "Instructor": [""] # Blank means general holiday
+        "Title": ["Juneteenth (Example)", "Joel - Out", "Jamila - Maternity"],
+        "Start Date": ["2026-06-19", "2026-06-04", "2026-05-19"],
+        "End Date": ["2026-06-19", "2026-06-09", "2026-07-20"],
+        "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"]
     })
 
 if 'locations_data' not in st.session_state:
@@ -150,8 +164,8 @@ with col1:
     df_catalog = st.data_editor(st.session_state.catalog_data, num_rows="dynamic", use_container_width=True)
     
     st.subheader("🌴 Time Off & Holidays")
-    st.markdown("Format: YYYY-MM-DD. Leave Instructor blank for agency holidays.")
-    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True)
+    st.markdown("Format: YYYY-MM-DD. Leave Instructor email blank for agency holidays.")
+    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True, column_config={"Instructor": st.column_config.TextColumn("Instructor (Email)")})
 
 with col2:
     st.subheader("👥 Instructor Roster")
@@ -166,35 +180,4 @@ st.markdown("---")
 # --- Generation Controls ---
 col3, col4, col5 = st.columns([1, 1, 2])
 with col3:
-    target_year = st.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
-with col4:
-    target_month = st.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
-with col5:
-    st.write("") # Spacer
-    st.write("") # Spacer
-    generate_btn = st.button("🚀 Generate Schedule", type="primary", use_container_width=True)
-
-# --- Execution Logic ---
-if generate_btn:
-    with st.spinner("Calculating optimal schedule..."):
-        schedule_df, warnings = generate_training_schedule(
-            df_catalog, df_roster, df_timeoff, df_locations, target_year, target_month
-        )
-        
-        if not schedule_df.empty:
-            st.success(f"✅ Schedule successfully generated for {calendar.month_name[target_month]} {target_year}!")
-            for w in warnings:
-                st.warning(w)
-                
-            st.dataframe(schedule_df, use_container_width=True, hide_index=True)
-            
-            csv = schedule_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Schedule as CSV",
-                data=csv,
-                file_name=f"Training_Schedule_{target_year}_{target_month}.csv",
-                mime="text/csv",
-            )
-        else:
-            for w in warnings:
-                st.error(w)
+    target_year = st.number_input("Target Year", min_value=2024, max_value=
