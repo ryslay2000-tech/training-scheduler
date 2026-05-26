@@ -197,4 +197,4 @@ if generate_btn:
             )
         else:
             for w in warnings:
-         
+                st.error(w)
