@@ -126,10 +126,11 @@ st.sidebar.markdown("---")
 st.sidebar.header("2. Upload SharePoint Data")
 st.sidebar.markdown("Export these lists as CSV from SharePoint and upload them here.")
 
-class_file = st.sidebar.file_input("Upload Class Catalog.csv", type="csv")
-roster_file = st.sidebar.file_input("Upload Instructor Roster.csv", type="csv")
-timeoff_file = st.sidebar.file_input("Upload Time Off and Holidays.csv", type="csv")
-locations_file = st.sidebar.file_input("Upload Locations.csv", type="csv")
+# Simplified file inputs for debugging
+class_file = st.sidebar.file_input("Upload Class Catalog.csv")
+roster_file = st.sidebar.file_input("Upload Instructor Roster.csv")
+timeoff_file = st.sidebar.file_input("Upload Time Off and Holidays.csv")
+locations_file = st.sidebar.file_input("Upload Locations.csv")
 
 # Main Area Logic
 if st.button("🚀 Generate Schedule", type="primary"):
@@ -169,3 +170,4 @@ if st.button("🚀 Generate Schedule", type="primary"):
                 st.error(f"An error occurred while processing the files: {e}")
 else:
     st.info("👈 Upload your files in the sidebar and click 'Generate Schedule' to begin.")
+
