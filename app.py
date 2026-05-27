@@ -154,7 +154,7 @@ if 'roster_data' not in st.session_state:
 if 'timeoff_data' not in st.session_state:
     st.session_state.timeoff_data = pd.DataFrame({ "Title": ["(Example)"], "Start Date": ["2026-06-19"], "End Date": ["2026-06-19"], "Instructor": [""] })
 if 'locations_data' not in st.session_state:
-    st.session_state.locations_data = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
+    st.session_state.locations_data = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11"]})
 
 # --- UI Layout ---
 colA, colB = st.columns(2)
