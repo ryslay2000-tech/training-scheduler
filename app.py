@@ -152,7 +152,7 @@ if 'catalog_data' not in st.session_state:
 if 'roster_data' not in st.session_state:
     st.session_state.roster_data = pd.DataFrame({ "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"], "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"], "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams, Outlook, Excel Formulas", "CapCentral, Texas Leg Apps", "CapCentral, TLIS, Word, Excel, Outlook", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible", "TLIS, CMS, Texas Leg Apps"] })
 if 'timeoff_data' not in st.session_state:
-    st.session_state.timeoff_data = pd.DataFrame({ "Title": ["Juneteenth (Example)", "Joel - Out", "Jamila - Maternity"], "Start Date": ["2026-06-19", "2026-06-04", "2026-05-19"], "End Date": ["2026-06-19", "2026-06-09", "2026-07-20"], "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"] })
+    st.session_state.timeoff_data = pd.DataFrame({ "Title": ["(Example)"], "Start Date": ["2026-06-19"], "End Date": ["2026-06-19"], "Instructor": [""] })
 if 'locations_data' not in st.session_state:
     st.session_state.locations_data = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
 
