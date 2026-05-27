@@ -4,14 +4,15 @@ from collections import defaultdict
 import calendar
 from datetime import datetime, timedelta
 import random
+import os
 
 # --- Helper Functions ---
 def check_overlap(start1, end1, start2, end2):
     """Checks if two time intervals overlap."""
     return max(start1, start2) < min(end1, end2)
 
-def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, target_year, target_month):
-    """Core scheduling logic with advanced distribution rules."""
+def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, target_year, target_month, is_session_mode):
+    """Core scheduling logic with advanced distribution and session mode rules."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
@@ -28,19 +29,23 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         for i in range((row['EndDate'] - row['StartDate']).days + 1):
             general_holidays.add(row['StartDate'] + timedelta(days=i))
 
-    workdays = [d for d in month_days if d.weekday() < 5 and d not in general_holidays]
-    if not workdays:
-        return pd.DataFrame(), ["No available workdays found for the selected month."]
+    # --- NEW: Filter workdays based on Session or Interim mode ---
+    if is_session_mode:
+        allowed_weekdays = [0, 1, 2, 3, 4] # Mon-Fri
+    else:
+        allowed_weekdays = [1, 2, 3] # Tue-Thu
 
-    # --- Initialize trackers ---
+    workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
+    
+    if not workdays:
+        return pd.DataFrame(), ["No available workdays found for the selected mode and month."]
+
     location_availability = defaultdict(list)
     instructor_availability = defaultdict(list)
     class_day_tracker = defaultdict(set)
     class_week_tracker = defaultdict(set)
     final_schedule = []
     
-    # --- Create a more balanced list of classes to schedule ---
-    # First, schedule one of each class, then the second, etc.
     class_dict = {}
     for _, row in class_catalog_df.iterrows():
         try:
@@ -66,7 +71,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             default_location = class_details['Default Location']
             class_frequency = int(class_details['Frequency'])
         except (IndexError, ValueError):
-            warnings.append(f"Could not find details or valid duration for class '{class_name}'.")
+            warnings.append(f"Could not find details for class '{class_name}'.")
             continue
             
         qualified_instructors = instructor_roster_df[instructor_roster_df['QualifiedClasses'].str.contains(class_name, na=False)].copy()
@@ -78,12 +83,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         for test_date in shuffled_workdays:
             if session_scheduled: break
 
-            # --- NEW RULE CHECKS ---
-            # 1. Check if class is already scheduled on this day
             if test_date in class_day_tracker[class_name]:
                 continue
             
-            # 2. Check if class is scheduled this week (if frequency <= 4)
             if class_frequency <= 4:
                 week_number = test_date.isocalendar()[1]
                 if week_number in class_week_tracker[class_name]:
@@ -111,14 +113,10 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     if is_on_leave: continue
 
                     if not any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
-                        # --- Schedule Found! Update all trackers ---
                         final_schedule.append({
-                            'Date': test_date,
-                            'Start Time': start_time.strftime('%I:%M %p'),
-                            'End Time': end_time.strftime('%I:%M %p'),
-                            'Class': class_name,
-                            'Instructor': instructor_name,
-                            'Location': default_location
+                            'Date': test_date, 'Start Time': start_time.strftime('%I:%M %p'),
+                            'End Time': end_time.strftime('%I:%M %p'), 'Class': class_name,
+                            'Instructor': instructor_name, 'Location': default_location
                         })
                         instructor_availability[instructor_name].append((start_time, end_time))
                         location_availability[default_location].append((start_time, end_time))
@@ -132,7 +130,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             warnings.append(f"Could not find a non-conflicting slot for an instance of '{class_name}'.")
 
     if not final_schedule:
-        return pd.DataFrame(), warnings if warnings else ["Could not generate a schedule with the given constraints."]
+        return pd.DataFrame(), warnings if warnings else ["Could not generate a schedule."]
 
     df = pd.DataFrame(final_schedule)
     df['Date_sort'] = pd.to_datetime(df['Date'])
@@ -142,93 +140,52 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     
     return df, warnings
 
-# --- Streamlit Web App Interface (No changes needed below this line) ---
+# --- Streamlit Web App Interface ---
 st.set_page_config(page_title="TLC Training Scheduler", page_icon="📅", layout="wide")
-
 st.title("📅 TLC Monthly Training Scheduler")
-st.markdown("Edit your class requirements and instructor availability below, then click generate.")
+st.markdown("Edit your data, select your scheduling mode, then click generate.")
 
+# --- Load/Initialize Data ---
+# (Default data definitions remain the same)
 if 'catalog_data' not in st.session_state:
-    st.session_state.catalog_data = pd.DataFrame({
-        "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps"],
-        "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1],
-        "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5],
-        "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "SHB 835"]
-    })
-
+    st.session_state.catalog_data = pd.DataFrame({ "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps"], "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1], "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5], "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "SHB 835"] })
 if 'roster_data' not in st.session_state:
-    st.session_state.roster_data = pd.DataFrame({
-        "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
-        "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"],
-        "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams, Outlook, Excel Formulas", "CapCentral, Texas Leg Apps", "CapCentral, TLIS, Word, Excel, Outlook", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible", "TLIS, CMS, Texas Leg Apps"]
-    })
-
+    st.session_state.roster_data = pd.DataFrame({ "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"], "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"], "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams, Outlook, Excel Formulas", "CapCentral, Texas Leg Apps", "CapCentral, TLIS, Word, Excel, Outlook", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible", "TLIS, CMS, Texas Leg Apps"] })
 if 'timeoff_data' not in st.session_state:
-    st.session_state.timeoff_data = pd.DataFrame({
-        "Title": ["Juneteenth (Example)", "Joel - Out", "Jamila - Maternity"],
-        "Start Date": ["2026-06-19", "2026-06-04", "2026-05-19"],
-        "End Date": ["2026-06-19", "2026-06-09", "2026-07-20"],
-        "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"]
-    })
-
+    st.session_state.timeoff_data = pd.DataFrame({ "Title": ["Juneteenth (Example)", "Joel - Out", "Jamila - Maternity"], "Start Date": ["2026-06-19", "2026-06-04", "2026-05-19"], "End Date": ["2026-06-19", "2026-06-09", "2026-07-20"], "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"] })
 if 'locations_data' not in st.session_state:
     st.session_state.locations_data = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
 
-col1, col2 = st.columns(2)
-with col1:
+# --- UI Layout ---
+colA, colB = st.columns(2)
+with colA:
     st.subheader("📚 Class Catalog")
-    st.markdown("Adjust frequency and duration (hours). Rule: Classes won't repeat in the same week unless Frequency > 4.")
     df_catalog = st.data_editor(st.session_state.catalog_data, num_rows="dynamic", use_container_width=True)
-    
     st.subheader("🌴 Time Off & Holidays")
-    st.markdown("Format: YYYY-MM-DD. Leave Instructor email blank for agency holidays.")
-    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True, column_config={"Instructor": st.column_config.TextColumn("Instructor (Email)")})
-
-with col2:
+    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True)
+with colB:
     st.subheader("👥 Instructor Roster")
-    st.markdown("Classes must be separated by commas.")
     df_roster = st.data_editor(st.session_state.roster_data, num_rows="dynamic", use_container_width=True)
-    
     st.subheader("🏢 Locations")
     df_locations = st.data_editor(st.session_state.locations_data, num_rows="dynamic", use_container_width=True)
 
-st.markdown("---")
-
-col3, col4, col5 = st.columns([1, 1, 2])
-with col3:
-    target_year = st.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
-with col4:
-    target_month = st.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
-with col5:
-    st.write("") 
-    st.write("") 
-    generate_btn = st.button("🚀 Generate Schedule", type="primary", use_container_width=True)
+st.sidebar.header("🗓️ Scheduling Controls")
+session_mode = st.sidebar.toggle("Session Mode (Mon-Fri)", value=True, help="ON = Session (Mon-Fri). OFF = Interim (Tue-Thu).")
+target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
+target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
+generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_container_width=True)
 
 if generate_btn:
     with st.spinner("Calculating optimal schedule..."):
-        st.session_state.catalog_data = df_catalog
-        st.session_state.roster_data = df_roster
-        st.session_state.timeoff_data = df_timeoff
-        st.session_state.locations_data = df_locations
-
-        schedule_df, warnings = generate_training_schedule(
-            df_catalog, df_roster, df_timeoff, df_locations, target_year, target_month
-        )
+        st.session_state.catalog_data, st.session_state.roster_data, st.session_state.timeoff_data, st.session_state.locations_data = df_catalog, df_roster, df_timeoff, df_locations
+        schedule_df, warnings = generate_training_schedule(df_catalog, df_roster, df_timeoff, df_locations, target_year, target_month, session_mode)
         
+        st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
         if not schedule_df.empty:
-            st.success(f"✅ Schedule successfully generated for {calendar.month_name[target_month]} {target_year}!")
-            for w in warnings:
-                st.warning(w)
-                
+            mode_text = "Session Mode (Mon-Fri)" if session_mode else "Interim Mode (Tues-Thur)"
+            st.success(f"✅ Schedule successfully generated in **{mode_text}**!")
+            for w in warnings: st.warning(w)
             st.dataframe(schedule_df, use_container_width=True, hide_index=True)
-            
-            csv = schedule_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Schedule as CSV",
-                data=csv,
-                file_name=f"Training_Schedule_{target_year}_{target_month}.csv",
-                mime="text/csv",
-            )
+            st.download_button("📥 Download as CSV", schedule_df.to_csv(index=False).encode('utf-8'), f"Training_Schedule_{target_year}_{target_month}.csv", "text/csv")
         else:
-            for w in warnings:
-                st.error(w)
+            for w in warnings: st.error(w)
