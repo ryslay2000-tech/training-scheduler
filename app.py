@@ -53,15 +53,14 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
 
     general_holidays = set()
     for _, row in time_off_df[time_off_df['Instructor'].isnull() | (time_off_df['Instructor'] == '')].iterrows():
-        # Handle cases where start or end dates might be NaT
         if pd.notna(row['StartDate']) and pd.notna(row['EndDate']):
             for i in range((row['EndDate'] - row['StartDate']).days + 1):
                 general_holidays.add(row['StartDate'] + timedelta(days=i))
 
     if is_session_mode:
-        allowed_weekdays = [0, 1, 2, 3, 4]  # Monday to Friday
+        allowed_weekdays = [0, 1, 2, 3, 4]
     else:
-        allowed_weekdays = [1, 2, 3]      # Tuesday to Thursday
+        allowed_weekdays = [1, 2, 3]
 
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
@@ -161,7 +160,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                             if test_date in instructor_restricted_tracker.get(instructor_name, []):
                                 continue
                         
-                                                # --- Strict Bidirectional WFH Policy Check ---
+                        # --- Bidirectional WFH Policy Check ---
                         day_of_week = test_date.weekday()
                         if day_of_week in wfh_days_map:
                             day_name = wfh_days_map[day_of_week]
@@ -170,22 +169,20 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 if not instructor_wfh_row.empty:
                                     wfh_status = str(instructor_wfh_row.iloc[0][day_name]).strip().upper()
                                     is_online_class = (str(default_location).strip().lower() == 'online')
-                                    
-                                    # 1. If WFH, they CANNOT teach in the office (can ONLY teach Online)
                                     if wfh_status == 'WFH' and not is_online_class:
                                         continue
-                                    
-                                    # 2. If in Office, they CANNOT teach an Online class
                                     if wfh_status != 'WFH' and is_online_class:
                                         continue
                             except (KeyError, IndexError):
-                                # Default assumption: In office (cannot teach online)
                                 if str(default_location).strip().lower() == 'online':
                                     continue
-
-
+                        
+                        # --- Instructor Availability Check with 30-Min Buffer ---
+                        candidate_start_buffered = start_time - timedelta(minutes=30)
+                        candidate_end_buffered = end_time + timedelta(minutes=30)
+                        
                         is_busy = False
-                        if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
+                        if any(check_overlap(candidate_start_buffered, candidate_end_buffered, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                             is_busy = True
                             continue
 
@@ -200,13 +197,14 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                     leave_end = datetime.strptime(leave['End Time'], '%I:%M %p').time()
                                     leave_start_dt = datetime.combine(test_date, leave_start)
                                     leave_end_dt = datetime.combine(test_date, leave_end)
-                                    if check_overlap(start_time, end_time, leave_start_dt, leave_end_dt):
+                                    if check_overlap(candidate_start_buffered, candidate_end_buffered, leave_start_dt, leave_end_dt):
                                         is_busy = True
                                         break
                                 except (ValueError, TypeError):
                                     continue
                         
                         if not is_busy:
+                            # Store actual class times in the final schedule
                             final_schedule.append({
                                 'Date': test_date,
                                 'Start Time': start_time.strftime('%I:%M %p'),
@@ -215,8 +213,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 'Instructor': instructor_name,
                                 'Location': default_location
                             })
-                            instructor_availability[instructor_name].append((start_time, end_time))
-                            location_availability[default_location].append((start_time, end_time))
+                            # Store the buffered window for the instructor's availability
+                            instructor_availability[instructor_name].append((candidate_start_buffered, candidate_end_buffered))
+                            location_availability[default_location].append((start_time, end_time)) # Location is only busy for actual class time
                             class_day_tracker[class_name].add(test_date)
                             class_week_tracker[class_name].add(test_date.isocalendar()[1])
                             instructor_load_count[instructor_name] += 1
@@ -239,6 +238,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     df['Date'] = df['Date_sort'].dt.strftime('%Y-%m-%d')
     df = df.sort_values(by=['Date_sort', 'Start Time sort']).drop(columns=['Start Time sort', 'Date_sort'])
     return df, warnings
+
 
 # --- UI Title ---
 st.title("📅 TLC Monthly Training Scheduler")
@@ -384,4 +384,3 @@ if generate_btn:
                     st.error(w)
             else:
                 st.error("Could not generate a schedule with the current constraints.")
-
