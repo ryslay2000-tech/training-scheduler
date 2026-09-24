@@ -32,15 +32,17 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             general_holidays.add(row['StartDate'] + timedelta(days=i))
 
     if is_session_mode:
-        allowed_weekdays = (0, 1, 2, 3, 4)  # Mon - Fri
+        allowed_weekdays = (0, 1, 2, 3, 4)
     else:
-        allowed_weekdays = (1, 2, 3)        # Tue - Thu
+        allowed_weekdays = (1, 2, 3)
 
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
     if not workdays:
         return pd.DataFrame(), ["No available workdays found for the selected mode and month."]
 
+    # Prepare WFH data for quick lookup
+    wfh_lookup = wfh_df.set_index(wfh_df.columns[0]).T.to_dict('list')
     wfh_days_map = {0: 'MONDAY', 1: 'TUESDAY', 2: 'WEDNESDAY', 3: 'THURSDAY', 4: 'FRIDAY'}
 
     location_availability = defaultdict(list)
@@ -88,11 +90,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             if session_scheduled:
                 break
 
-            iso_week = test_date.isocalendar().week
-
             if test_date in class_day_tracker[class_name]:
                 continue
-            if class_frequency <= 4 and iso_week in class_week_tracker[class_name]:
+            if class_frequency <= 4 and test_date.isocalendar() in class_week_tracker[class_name]:
                 continue
 
             preferred_start_times = [(9, 0), (10, 0), (13, 0), (14, 0)]
@@ -109,14 +109,14 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     instructor_name = instructor['Title']
                     instructor_full_name = instructor['Email Address']
 
-                    # Check LMS / CMS mutual exclusion rule
-                    restricted_set = {"LMS", "CMS"}
-                    if class_name in restricted_set:
-                        already_assigned = instructor_day_classes[instructor_name][test_date]
-                        if bool(already_assigned & (restricted_set - {class_name})):
-                            continue
+                    # --- CMS & LMS Mutual Exclusion Check ---
+                    restricted_pair = {"CMS", "LMS"}
+                    if class_name in restricted_pair:
+                        already_teaching = instructor_day_classes[instructor_name][test_date]
+                        if bool(already_teaching & (restricted_pair - {class_name})):
+                            continue  # Skip: Instructor cannot teach both CMS and LMS on the same date
 
-                    # WFH Policy Check for Online Classes
+                    # --- WFH Policy Check for Online Classes ---
                     if str(default_location).lower() == 'online':
                         day_of_week = test_date.weekday()
                         if day_of_week in wfh_days_map:
@@ -126,11 +126,11 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 if not instructor_wfh_row.empty:
                                     wfh_status = instructor_wfh_row.iloc[0][day_name]
                                     if wfh_status != 'WFH':
-                                        continue
+                                        continue  # Skip: Can't teach online if not WFH
                             except (KeyError, IndexError):
                                 continue
 
-                    # Time-off check
+                    # --- Granular time-off check ---
                     is_busy = False
                     if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                         is_busy = True
@@ -139,7 +139,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     instructor_time_off = time_off_df[time_off_df['Instructor'] == instructor_full_name]
                     for _, leave in instructor_time_off.iterrows():
                         if leave['StartDate'] <= test_date <= leave['EndDate']:
-                            if pd.isna(leave['Start Time']) or leave['Start Time'] in ('nan', ''):
+                            if pd.isna(leave['Start Time']) or leave['Start Time'] in ['nan', '']:
                                 is_busy = True
                                 break
                             try:
@@ -166,7 +166,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                         location_availability[default_location].append((start_time, end_time))
                         instructor_day_classes[instructor_name][test_date].add(class_name)
                         class_day_tracker[class_name].add(test_date)
-                        class_week_tracker[class_name].add(iso_week)
+                        class_week_tracker[class_name].add(test_date.isocalendar())
 
                         session_scheduled = True
                         break
@@ -188,20 +188,4 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
 
 
 # --- Streamlit Web App Interface ---
-st.set_page_config(page_title="TLC Training Scheduler", page_icon="📅", layout="wide")
-st.title("📅 TLC Monthly Training Scheduler")
-st.markdown("Edit your data, select your scheduling mode, then click generate.")
-
-# --- Default Data Definitions ---
-if 'catalog_data' not in st.session_state:
-    st.session_state.catalog_data = pd.DataFrame({
-        "Title": [
-            "CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams",
-            "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible",
-            "Outlook", "Excel Formulas", "Texas Leg Apps", "LMS"
-        ],
-        "Frequency": (2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1, 1),
-        "Duration": (1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5, 1.5),
-        "Default Location": [
-            "SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11",
-            "SHB 835", "SHB 835
+st.set_page_config
