@@ -136,7 +136,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     # --- LMS / CMS Same-Day Check ---
                     if class_name in RESTRICTED_CMS_LMS_CLASSES:
                         if test_date in instructor_restricted_tracker[instructor_name]:
-                            continue  # Instructor is already teaching an LMS/CMS class today
+                            continue  # Instructor already assigned an LMS/CMS class today
 
                     # --- WFH Policy Check for Online Classes ---
                     if str(default_location).lower() == 'online':
@@ -148,7 +148,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 if not instructor_wfh_row.empty:
                                     wfh_status = instructor_wfh_row.iloc[0][day_name]
                                     if wfh_status != 'WFH':
-                                        continue  # Can't teach online if not WFH
+                                        continue  # Cannot teach online if not WFH
                             except (KeyError, IndexError):
                                 continue
 
@@ -294,38 +294,4 @@ with colB:
         save_data("roster.csv", df_roster)
 
     st.subheader("🏢 Locations")
-    df_locations = st.data_editor(st.session_state.locations_data, num_rows="dynamic", use_container_width=True, key="locations_editor")
-    if not df_locations.equals(st.session_state.locations_data):
-        st.session_state.locations_data = df_locations
-        save_data("locations.csv", df_locations)
-
-# --- Sidebar & Generation ---
-st.sidebar.header("🗓️ Scheduling Controls")
-session_mode = st.sidebar.toggle("Session Mode (Mon-Fri)", value=True, help="ON = Session (Mon-Fri). OFF = Interim (Tue-Thu).")
-target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
-target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
-generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_container_width=True)
-
-if generate_btn:
-    with st.spinner("Calculating optimal schedule..."):
-        schedule_df, warnings = generate_training_schedule(
-            st.session_state.catalog_data,
-            st.session_state.roster_data,
-            st.session_state.timeoff_data,
-            st.session_state.locations_data,
-            st.session_state.wfh_data,
-            target_year,
-            target_month,
-            session_mode
-        )
-
-        st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
-
-        if not schedule_df.empty:
-            mode_text = "Session Mode (Mon-Fri)" if session_mode else "Interim Mode (Tues-Thur)"
-            st.success(f"✅ Schedule successfully generated in **{mode_text}**!")
-            for w in warnings:
-                st.warning(w)
-            st.dataframe(schedule_df, use_container_width=True, hide_index=True)
-            st.download_button("📥 Download as CSV", schedule_df.to_csv(index=False).encode('utf-8'), f"Training_Schedule_{target_year}_{target_month}.csv", "text/csv")
-       
+    df_locations = st.data_editor(st.session_state.locations_data, num_rows="dynamic", use_container_width=True, key="locations_edit
