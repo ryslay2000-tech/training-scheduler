@@ -131,4 +131,150 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 for start_hour, start_minute in preferred_start_times:
                     if session_scheduled:
                         break
-                    start_
+                    start_time = datetime.combine(test_date, datetime.min.time()).replace(hour=start_hour, minute=start_minute)
+                    end_time = start_time + timedelta(hours=duration_hours)
+
+                    if any(check_overlap(start_time, end_time, bs, be) for bs, be in location_availability.get(default_location, [])):
+                        continue
+
+                    qualified_instructors = qualified_instructors_base.copy()
+                    qualified_instructors['current_load'] = qualified_instructors['Title'].map(instructor_load_count).fillna(0)
+                    qualified_instructors['random_tie'] = [random.random() for _ in range(len(qualified_instructors))]
+                    qualified_instructors = qualified_instructors.sort_values(by=['current_load', 'random_tie']).reset_index(drop=True)
+
+                    for _, instructor in qualified_instructors.iterrows():
+                        instructor_name = instructor['Title']
+                        instructor_full_name = instructor['Email Address']
+
+                        if strict_balance:
+                            min_load = min(instructor_load_count.values()) if instructor_load_count else 0
+                            if instructor_load_count.get(instructor_name, 0) >= (min_load + 3):
+                                continue
+
+                        if class_name in RESTRICTED_CMS_LMS_CLASSES:
+                            if test_date in instructor_restricted_tracker.get(instructor_name, []):
+                                continue
+
+                        # Bidirectional WFH Policy Check
+                        day_of_week = test_date.weekday()
+                        if day_of_week in wfh_days_map:
+                            day_name = wfh_days_map[day_of_week]
+                            try:
+                                instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
+                                if not instructor_wfh_row.empty:
+                                    wfh_status = instructor_wfh_row.iloc[0][day_name]
+                                    if wfh_status == 'WFH' and str(default_location).lower() != 'online':
+                                        continue
+                                    if wfh_status != 'WFH' and str(default_location).lower() == 'online':
+                                        continue
+                            except (KeyError, IndexError):
+                                if str(default_location).lower() == 'online':
+                                    continue
+
+                        is_busy = False
+                        if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
+                            is_busy = True
+                            continue
+
+                        instructor_time_off = time_off_df[time_off_df['Instructor'] == instructor_full_name]
+                        for _, leave in instructor_time_off.iterrows():
+                            if leave['StartDate'] <= test_date <= leave['EndDate']:
+                                if pd.isna(leave['Start Time']) or leave['Start Time'] in ['nan', '']:
+                                    is_busy = True
+                                    break
+                                try:
+                                    leave_start = datetime.strptime(leave['Start Time'], '%I:%M %p').time()
+                                    leave_end = datetime.strptime(leave['End Time'], '%I:%M %p').time()
+                                    leave_start_dt = datetime.combine(test_date, leave_start)
+                                    leave_end_dt = datetime.combine(test_date, leave_end)
+                                    if check_overlap(start_time, end_time, leave_start_dt, leave_end_dt):
+                                        is_busy = True
+                                        break
+                                except (ValueError, TypeError):
+                                    continue
+
+                        if not is_busy:
+                            final_schedule.append({
+                                'Date': test_date,
+                                'Start Time': start_time.strftime('%I:%M %p'),
+                                'End Time': end_time.strftime('%I:%M %p'),
+                                'Class': class_name,
+                                'Instructor': instructor_name,
+                                'Location': default_location
+                            })
+                            instructor_availability[instructor_name].append((start_time, end_time))
+                            location_availability[default_location].append((start_time, end_time))
+                            class_day_tracker[class_name].add(test_date)
+                            class_week_tracker[class_name].add(test_date.isocalendar())
+                            instructor_load_count[instructor_name] += 1
+
+                            if class_name in RESTRICTED_CMS_LMS_CLASSES:
+                                instructor_restricted_tracker[instructor_name].add(test_date)
+
+                            session_scheduled = True
+                            break
+
+        if not session_scheduled:
+            warnings.append(f"Could not find a non-conflicting slot for an instance of '{class_name}'.")
+
+    if not final_schedule:
+        return pd.DataFrame(), warnings if warnings else ["Could not generate a schedule."]
+
+    df = pd.DataFrame(final_schedule)
+    df['Date_sort'] = pd.to_datetime(df['Date'])
+    df['Start Time sort'] = pd.to_datetime(df['Start Time'], format='%I:%M %p').dt.time
+    df['Date'] = df['Date_sort'].dt.strftime('%Y-%m-%d')
+    df = df.sort_values(by=['Date_sort', 'Start Time sort']).drop(columns=['Start Time sort', 'Date_sort'])
+    return df, warnings
+
+# --- Streamlit Web App Interface ---
+st.set_page_config(page_title="TLC Training Scheduler", page_icon="📅", layout="wide")
+st.title("📅 TLC Monthly Training Scheduler")
+st.markdown("Edit your data, select your scheduling mode, then click generate.")
+
+# --- Default Fallback Data Definitions ---
+default_catalog = pd.DataFrame({
+    "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "TLA", "TLA Online", "Word ADA", "Word ADA Online"],
+    "Frequency": [8, 4, 8, 4, 8, 8, 4, 4, 2, 8, 8, 4, 8, 4, 4, 2],
+    "Duration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0],
+    "Default Location": ["SHB 835", "Online", "SHB 865", "Online", "JHR G11", "SHB 835", "SHB 865", "Online", "Online", "SHB 865", "JHR G10", "Online", "JHR G11", "Online", "JHR G10", "Online"]
+})
+
+default_roster = pd.DataFrame({
+    "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
+    "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"],
+    "QualifiedClasses": [
+        "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online",
+        "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online",
+        "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online",
+        "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online",
+        "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online"
+    ]
+})
+
+default_timeoff = pd.DataFrame({
+    "Title": ["Juneteenth (Example)", "Joel - Out (All Day)", "Jeb - Meeting"],
+    "Start Date": ["2026-06-19", "2026-06-04", "2026-06-09"],
+    "End Date": ["2026-06-19", "2026-06-09", "2026-06-10"],
+    "Start Time": ["", "", "10:00 AM"],
+    "End Time": ["", "", "11:00 AM"],
+    "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jeb.Callan@tlc.texas.gov"]
+})
+
+default_locations = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
+
+default_wfh = pd.DataFrame({
+    "Instructor": ["Jamila", "Jeb", "Joel", "Lisa", "Ryan"],
+    "MONDAY": ["Office", "WFH", "WFH", "Office", "WFH"],
+    "TUESDAY": ["Office", "Office", "Office", "Office", "Office"],
+    "WEDNESDAY": ["Office", "Office", "Office", "Office", "WFH"],
+    "THURSDAY": ["WFH", "Office", "WFH", "WFH", "Office"],
+    "FRIDAY": ["WFH", "WFH", "Office", "WFH", "Office"]
+})
+
+# --- Persistent Loading into Session State ---
+if 'catalog_data' not in st.session_state:
+    st.session_state.catalog_data = load_or_init_data("catalog.csv", default_catalog)
+if 'roster_data' not in st.session_state:
+    st.session_state.roster_data = load_or_init_data("roster.csv", default_roster)
+if 'timeoff_data' not 
