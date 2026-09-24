@@ -246,12 +246,12 @@ default_roster = pd.DataFrame({
 })
 
 default_timeoff = pd.DataFrame({
-    "Title": ["Juneteenth (Example)", "Joel - Out (All Day)", "Jeb - Meeting"],
-    "Start Date": ["2026-06-19", "2026-06-04", "2026-06-09"],
-    "End Date": ["2026-06-19", "2026-06-09", "2026-06-10"],
-    "Start Time": ["", "", "10:00 AM"],
-    "End Time": ["", "", "11:00 AM"],
-    "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jeb.Callan@tlc.texas.gov"]
+    "Title": ["New Years Day", "MLK Day"],
+    "Start Date": ["2027-01-01", "2026-01-18"],
+    "End Date": ["2026-01-01", "2026-01-18"],
+    "Start Time": ["", "",],
+    "End Time": ["", ""],
+    "Instructor": [""]
 })
 
 default_locations = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
