@@ -31,7 +31,6 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         for i in range((row['EndDate'] - row['StartDate']).days + 1):
             general_holidays.add(row['StartDate'] + timedelta(days=i))
 
-    # Define allowed days using tuples (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri)
     if is_session_mode:
         allowed_weekdays = (0, 1, 2, 3, 4)  # Mon - Fri
     else:
@@ -196,94 +195,13 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 # --- Default Data Definitions ---
 if 'catalog_data' not in st.session_state:
     st.session_state.catalog_data = pd.DataFrame({
-        "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps", "LMS"],
-        "Frequency":,
-        "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5, 1.5],
-        "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "Online", "Online"]
-    })
-
-if 'roster_data' not in st.session_state:
-    st.session_state.roster_data = pd.DataFrame({
-        "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
-        "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"],
-        "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams, Outlook, Excel Formulas, LMS", "CapCentral, Texas Leg Apps", "CapCentral, TLIS, Word, Excel, Outlook", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible", "TLIS, CMS, Texas Leg Apps, LMS"]
-    })
-
-if 'timeoff_data' not in st.session_state:
-    st.session_state.timeoff_data = pd.DataFrame({
-        "Title": ["Juneteenth (Example)", "Joel - Out (All Day)", "Jeb - Meeting"],
-        "Start Date": ["2026-06-19", "2026-06-04", "2026-06-09"],
-        "End Date": ["2026-06-19", "2026-06-09", "2026-06-10"],
-        "Start Time": ["", "", "10:00 AM"],
-        "End Time": ["", "", "11:00 AM"],
-        "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jeb.Callan@tlc.texas.gov"]
-    })
-
-if 'locations_data' not in st.session_state:
-    st.session_state.locations_data = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
-
-if 'wfh_data' not in st.session_state:
-    st.session_state.wfh_data = pd.DataFrame({
-        "Instructor": ["Jamila", "Jeb", "Joel", "Lisa", "Ryan"],
-        "MONDAY": ["Office", "WFH", "WFH", "Office", "WFH"],
-        "TUESDAY": ["Office", "Office", "Office", "Office", "Office"],
-        "WEDNESDAY": ["Office", "Office", "Office", "Office", "WFH"],
-        "THURSDAY": ["WFH", "Office", "WFH", "WFH", "Office"],
-        "FRIDAY": ["WFH", "WFH", "Office", "WFH", "Office"]
-    })
-
-# --- UI Layout ---
-colA, colB = st.columns(2)
-with colA:
-    st.subheader("📚 Class Catalog")
-    df_catalog = st.data_editor(st.session_state.catalog_data, num_rows="dynamic", use_container_width=True)
-
-    st.subheader("🌴 Time Off & Holidays")
-    st.markdown("Add specific times for partial-day conflicts. Leave times blank for all-day events.")
-    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True, column_config={"Instructor": st.column_config.TextColumn("Instructor (Email)")})
-
-    st.subheader("🏠 Work From Home Schedule")
-    df_wfh = st.data_editor(st.session_state.wfh_data, num_rows="dynamic", use_container_width=True)
-
-with colB:
-    st.subheader("👥 Instructor Roster")
-    df_roster = st.data_editor(st.session_state.roster_data, num_rows="dynamic", use_container_width=True)
-
-    st.subheader("🏢 Locations")
-    df_locations = st.data_editor(st.session_state.locations_data, num_rows="dynamic", use_container_width=True)
-
-# --- Sidebar Controls ---
-st.sidebar.header("🗓️ Scheduling Controls")
-session_mode = st.sidebar.toggle("Session Mode (Mon-Fri)", value=True, help="ON = Session (Mon-Fri). OFF = Interim (Tue-Thu).")
-target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
-target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
-generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_container_width=True)
-
-if generate_btn:
-    with st.spinner("Calculating optimal schedule..."):
-        st.session_state.catalog_data = df_catalog
-        st.session_state.roster_data = df_roster
-        st.session_state.timeoff_data = df_timeoff
-        st.session_state.locations_data = df_locations
-        st.session_state.wfh_data = df_wfh
-
-        schedule_df, warnings = generate_training_schedule(
-            df_catalog, df_roster, df_timeoff, df_locations, df_wfh, target_year, target_month, session_mode
-        )
-
-        st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
-        if not schedule_df.empty:
-            mode_text = "Session Mode (Mon-Fri)" if session_mode else "Interim Mode (Tues-Thur)"
-            st.success(f"✅ Schedule successfully generated in **{mode_text}**!")
-            for w in warnings:
-                st.warning(w)
-            st.dataframe(schedule_df, use_container_width=True, hide_index=True)
-            st.download_button(
-                "📥 Download as CSV",
-                schedule_df.to_csv(index=False).encode('utf-8'),
-                f"Training_Schedule_{target_year}_{target_month}.csv",
-                "text/csv"
-            )
-        else:
-            for w in warnings:
-                st.error(w)
+        "Title": [
+            "CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams",
+            "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible",
+            "Outlook", "Excel Formulas", "Texas Leg Apps", "LMS"
+        ],
+        "Frequency": (2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1, 1),
+        "Duration": (1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5, 1.5),
+        "Default Location": [
+            "SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11",
+            "SHB 835", "SHB 835
