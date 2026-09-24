@@ -17,6 +17,7 @@ def load_or_init_data(filename: str, default_df: pd.DataFrame) -> pd.DataFrame:
         try:
             return pd.read_csv(filepath)
         except Exception:
+            # If file is corrupted or empty, overwrite with default
             pass
     default_df.to_csv(filepath, index=False)
     return default_df
@@ -53,9 +54,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             general_holidays.add(row['StartDate'] + timedelta(days=i))
 
     if is_session_mode:
-        allowed_weekdays =
+        allowed_weekdays = [0, 1, 2, 3, 4]  # Mon-Fri
     else:
-        allowed_weekdays =
+        allowed_weekdays = [1, 2, 3]  # Tue-Thu
 
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
@@ -116,7 +117,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 break
             if test_date in class_day_tracker[class_name]:
                 continue
-            if class_frequency <= 4 and test_date.isocalendar() in class_week_tracker[class_name]:
+            if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker[class_name]:
                 continue
 
             preferred_start_times = [(9, 0), (10, 0), (13, 0), (14, 0)]
@@ -136,7 +137,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     # --- LMS / CMS Same-Day Check ---
                     if class_name in RESTRICTED_CMS_LMS_CLASSES:
                         if test_date in instructor_restricted_tracker[instructor_name]:
-                            continue  # Instructor already assigned an LMS/CMS class today
+                            continue  # Instructor is already teaching an LMS/CMS class today
 
                     # --- WFH Policy Check for Online Classes ---
                     if str(default_location).lower() == 'online':
@@ -148,7 +149,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 if not instructor_wfh_row.empty:
                                     wfh_status = instructor_wfh_row.iloc[0][day_name]
                                     if wfh_status != 'WFH':
-                                        continue  # Cannot teach online if not WFH
+                                        continue  # Can't teach online if not WFH
                             except (KeyError, IndexError):
                                 continue
 
@@ -187,7 +188,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                         instructor_availability[instructor_name].append((start_time, end_time))
                         location_availability[default_location].append((start_time, end_time))
                         class_day_tracker[class_name].add(test_date)
-                        class_week_tracker[class_name].add(test_date.isocalendar())
+                        class_week_tracker[class_name].add(test_date.isocalendar()[1])
 
                         # Record restricted class assignment
                         if class_name in RESTRICTED_CMS_LMS_CLASSES:
@@ -220,7 +221,7 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 # --- Default Fallback Data Definitions ---
 default_catalog = pd.DataFrame({
     "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps", "LMS-S", "LMS-H", "LMS-C", "LMS-C Online", "CMS Online"],
-    "Frequency":,
+    "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1],
     "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5, 1.5, 1.5, 1.5, 1.5, 2.0],
     "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "Online", "SHB 835", "SHB 865", "SHB 835", "Online", "Online"]
 })
@@ -294,4 +295,41 @@ with colB:
         save_data("roster.csv", df_roster)
 
     st.subheader("🏢 Locations")
-    df_locations = st.data_editor(st.session_state.locations_data, num_rows="dynamic", use_container_width=True, key="locations_edit
+    df_locations = st.data_editor(st.session_state.locations_data, num_rows="dynamic", use_container_width=True, key="locations_editor")
+    if not df_locations.equals(st.session_state.locations_data):
+        st.session_state.locations_data = df_locations
+        save_data("locations.csv", df_locations)
+
+# --- Sidebar & Generation ---
+st.sidebar.header("🗓️ Scheduling Controls")
+session_mode = st.sidebar.toggle("Session Mode (Mon-Fri)", value=True, help="ON = Session (Mon-Fri). OFF = Interim (Tue-Thu).")
+target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
+target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
+generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_container_width=True)
+
+if generate_btn:
+    with st.spinner("Calculating optimal schedule..."):
+        schedule_df, warnings = generate_training_schedule(
+            st.session_state.catalog_data,
+            st.session_state.roster_data,
+            st.session_state.timeoff_data,
+            st.session_state.locations_data,
+            st.session_state.wfh_data,
+            target_year,
+            target_month,
+            session_mode
+        )
+
+        st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
+
+        if not schedule_df.empty:
+            mode_text = "Session Mode (Mon-Fri)" if session_mode else "Interim Mode (Tues-Thur)"
+            st.success(f"✅ Schedule successfully generated in **{mode_text}**!")
+            for w in warnings:
+                st.warning(w)
+            st.dataframe(schedule_df, use_container_width=True, hide_index=True)
+            st.download_button("📥 Download as CSV", schedule_df.to_csv(index=False).encode('utf-8'), f"Training_Schedule_{target_year}_{target_month}.csv", "text/csv")
+        else:
+            for w in warnings:
+                st.error(w)
+
