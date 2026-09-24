@@ -156,19 +156,26 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                             if test_date in instructor_restricted_tracker.get(instructor_name, []):
                                 continue
 
-                        if str(default_location).lower() == 'online':
-                            day_of_week = test_date.weekday()
-                            if day_of_week in wfh_days_map:
-                                day_name = wfh_days_map[day_of_week]
-                                try:
-                                    instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
-                                    if not instructor_wfh_row.empty:
-                                        wfh_status = instructor_wfh_row.iloc[0][day_name]
-                                        if wfh_status != 'WFH':
-                                            continue
-                                except (KeyError, IndexError):
+                        # --- Bidirectional WFH Policy Check ---
+                        day_of_week = test_date.weekday()
+                        if day_of_week in wfh_days_map:
+                            day_name = wfh_days_map[day_of_week]
+                            try:
+                                instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
+                                if not instructor_wfh_row.empty:
+                                    wfh_status = instructor_wfh_row.iloc[0][day_name]
+                                    # Rule 1: Can't teach in-person class while WFH
+                                    if wfh_status == 'WFH' and str(default_location).lower() != 'online':
+                                        continue
+                                    # Rule 2: Must be WFH to teach an online class
+                                    if wfh_status != 'WFH' and str(default_location).lower() == 'online':
+                                        continue
+                            except (KeyError, IndexError):
+                                # If day/instructor not in WFH schedule, assume they are in office.
+                                # This means they can't teach online classes.
+                                if str(default_location).lower() == 'online':
                                     continue
-
+                        
                         is_busy = False
                         if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                             is_busy = True
@@ -240,7 +247,7 @@ default_catalog = pd.DataFrame({
 })
 
 default_roster = pd.DataFrame({
-    "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
+      "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
     "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"],
     "QualifiedClasses": ["CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online"]
 })
@@ -366,6 +373,3 @@ if generate_btn:
             workload_summary.columns = ['Instructor', 'Classes Scheduled']
             st.dataframe(workload_summary, hide_index=True)
         else:
-            for w in warnings:
-                st.error(w)
-
