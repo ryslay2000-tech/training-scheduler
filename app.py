@@ -72,7 +72,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online", "LMS Online", "CMS Online", "CMS"}
     instructor_restricted_tracker = defaultdict(set)
 
-    # --- Workload Balancing Tracker ---
+    # Workload Balancing Tracker
     all_instructors = instructor_roster_df['Title'].dropna().unique().tolist()
     instructor_load_count = {name: 0 for name in all_instructors}
 
@@ -125,4 +125,10 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 if class_frequency <= 4 and test_date.isocalendar() in class_week_tracker.get(class_name, []):
                     continue
 
-                preferred_start_times = [(9, 30), 
+                preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
+                random.shuffle(preferred_start_times)
+
+                for start_hour, start_minute in preferred_start_times:
+                    if session_scheduled:
+                        break
+                    start_
