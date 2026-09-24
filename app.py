@@ -107,7 +107,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     instructor_name = instructor['Title']
                     instructor_full_name = instructor['Email Address']
 
-                    # Check mutual exclusion rule (LMS and CMS on same day)
+                    # Check LMS / CMS mutual exclusion rule
                     restricted_set = {"LMS", "CMS"}
                     if class_name in restricted_set:
                         already_assigned = instructor_day_classes[instructor_name][test_date]
@@ -124,11 +124,11 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 if not instructor_wfh_row.empty:
                                     wfh_status = instructor_wfh_row.iloc[0][day_name]
                                     if wfh_status != 'WFH':
-                                        continue  # Must be WFH to teach online
+                                        continue
                             except (KeyError, IndexError):
                                 continue
 
-                    # Time-off & busy check
+                    # Time-off check
                     is_busy = False
                     if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                         is_busy = True
