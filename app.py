@@ -161,25 +161,28 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                             if test_date in instructor_restricted_tracker.get(instructor_name, []):
                                 continue
                         
-                        # --- Bidirectional WFH Policy Check ---
+                                                # --- Strict Bidirectional WFH Policy Check ---
                         day_of_week = test_date.weekday()
                         if day_of_week in wfh_days_map:
                             day_name = wfh_days_map[day_of_week]
                             try:
                                 instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
                                 if not instructor_wfh_row.empty:
-                                    wfh_status = instructor_wfh_row.iloc[0][day_name]
-                                    # Rule 1: Can't teach in-person class while WFH
-                                    if wfh_status == 'WFH' and str(default_location).lower() != 'online':
+                                    wfh_status = str(instructor_wfh_row.iloc[0][day_name]).strip().upper()
+                                    is_online_class = (str(default_location).strip().lower() == 'online')
+                                    
+                                    # 1. If WFH, they CANNOT teach in the office (can ONLY teach Online)
+                                    if wfh_status == 'WFH' and not is_online_class:
                                         continue
-                                    # Rule 2: Must be WFH to teach an online class
-                                    if wfh_status != 'WFH' and str(default_location).lower() == 'online':
+                                    
+                                    # 2. If in Office, they CANNOT teach an Online class
+                                    if wfh_status != 'WFH' and is_online_class:
                                         continue
                             except (KeyError, IndexError):
-                                # If day/instructor not in WFH schedule, assume they are in office.
-                                # This means they can't teach online classes.
-                                if str(default_location).lower() == 'online':
+                                # Default assumption: In office (cannot teach online)
+                                if str(default_location).strip().lower() == 'online':
                                     continue
+
 
                         is_busy = False
                         if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
