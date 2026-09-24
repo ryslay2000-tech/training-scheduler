@@ -12,7 +12,7 @@ def check_overlap(start1, end1, start2, end2):
     return max(start1, start2) < min(end1, end2)
 
 def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, wfh_df, target_year, target_month, is_session_mode):
-    """Core scheduling logic with interval, WFH, and course-conflict resolution."""
+    """Core scheduling logic with time-interval and WFH conflict resolution."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
@@ -31,17 +31,23 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         for i in range((row['EndDate'] - row['StartDate']).days + 1):
             general_holidays.add(row['StartDate'] + timedelta(days=i))
 
-    allowed_weekdays = if is_session_mode else
+    if is_session_mode:
+        allowed_weekdays = [0, 1, 2, 3, 4]
+    else:
+        allowed_weekdays = [1, 2, 3]
+
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
     if not workdays:
         return pd.DataFrame(), ["No available workdays found for the selected mode and month."]
 
+    # Prepare WFH data for quick lookup
+    wfh_lookup = wfh_df.set_index(wfh_df.columns[0]).T.to_dict('list')
     wfh_days_map = {0: 'MONDAY', 1: 'TUESDAY', 2: 'WEDNESDAY', 3: 'THURSDAY', 4: 'FRIDAY'}
+
 
     location_availability = defaultdict(list)
     instructor_availability = defaultdict(list)
-    instructor_day_classes = defaultdict(lambda: defaultdict(set))
     class_day_tracker = defaultdict(set)
     class_week_tracker = defaultdict(set)
     final_schedule = []
@@ -81,12 +87,11 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         random.shuffle(shuffled_workdays)
 
         for test_date in shuffled_workdays:
-            if session_scheduled:
-                break
+            if session_scheduled: break
 
             if test_date in class_day_tracker[class_name]:
                 continue
-            if class_frequency <= 4 and test_date.isocalendar() in class_week_tracker[class_name]:
+            if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker[class_name]:
                 continue
 
             preferred_start_times = [(9, 0), (10, 0), (13, 0), (14, 0)]
@@ -103,69 +108,59 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     instructor_name = instructor['Title']
                     instructor_full_name = instructor['Email Address']
 
-                    # Check LMS / CMS mutual exclusion rule
-                    restricted_set = {"LMS", "CMS"}
-                    if class_name in restricted_set:
-                        already_assigned = instructor_day_classes[instructor_name][test_date]
-                        if bool(already_assigned & (restricted_set - {class_name})):
-                            continue
-
-                    # WFH Policy Check for Online Classes
+                    # --- NEW: WFH Policy Check for Online Classes ---
                     if str(default_location).lower() == 'online':
                         day_of_week = test_date.weekday()
-                        if day_of_week in wfh_days_map:
+                        if day_of_week in wfh_days_map: # Check only on weekdays
                             day_name = wfh_days_map[day_of_week]
                             try:
+                                # Find instructor's row and check the status for the day
                                 instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
                                 if not instructor_wfh_row.empty:
                                     wfh_status = instructor_wfh_row.iloc[0][day_name]
                                     if wfh_status != 'WFH':
-                                        continue
+                                        continue # Skip: Can't teach online if not WFH
                             except (KeyError, IndexError):
+                                # If instructor or day not in schedule, assume they can't teach online
                                 continue
 
-                    # Time-off check
+
+                    # --- Granular time-off check ---
                     is_busy = False
+                    # Check against previously scheduled classes
                     if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                         is_busy = True
                         continue
 
+                    # Check against Time Off and Holidays list for specific time blocks
                     instructor_time_off = time_off_df[time_off_df['Instructor'] == instructor_full_name]
                     for _, leave in instructor_time_off.iterrows():
                         if leave['StartDate'] <= test_date <= leave['EndDate']:
                             if pd.isna(leave['Start Time']) or leave['Start Time'] in ['nan', '']:
-                                is_busy = True
-                                break
+                                is_busy = True; break
                             try:
                                 leave_start = datetime.strptime(leave['Start Time'], '%I:%M %p').time()
                                 leave_end = datetime.strptime(leave['End Time'], '%I:%M %p').time()
                                 leave_start_dt = datetime.combine(test_date, leave_start)
                                 leave_end_dt = datetime.combine(test_date, leave_end)
                                 if check_overlap(start_time, end_time, leave_start_dt, leave_end_dt):
-                                    is_busy = True
-                                    break
-                            except (ValueError, TypeError):
-                                continue
+                                    is_busy = True; break
+                            except (ValueError, TypeError): continue
 
                     if not is_busy:
                         final_schedule.append({
-                            'Date': test_date,
-                            'Start Time': start_time.strftime('%I:%M %p'),
-                            'End Time': end_time.strftime('%I:%M %p'),
-                            'Class': class_name,
-                            'Instructor': instructor_name,
-                            'Location': default_location
+                            'Date': test_date, 'Start Time': start_time.strftime('%I:%M %p'),
+                            'End Time': end_time.strftime('%I:%M %p'), 'Class': class_name,
+                            'Instructor': instructor_name, 'Location': default_location
                         })
                         instructor_availability[instructor_name].append((start_time, end_time))
                         location_availability[default_location].append((start_time, end_time))
-                        instructor_day_classes[instructor_name][test_date].add(class_name)
                         class_day_tracker[class_name].add(test_date)
-                        class_week_tracker[class_name].add(test_date.isocalendar())
+                        class_week_tracker[class_name].add(test_date.isocalendar()[1])
 
                         session_scheduled = True
                         break
-                if session_scheduled:
-                    break
+                if session_scheduled: break
         if not session_scheduled:
             warnings.append(f"Could not find a non-conflicting slot for an instance of '{class_name}'.")
 
