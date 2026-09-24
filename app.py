@@ -33,7 +33,7 @@ def check_overlap(start1, end1, start2, end2):
     return max(start1, start2) < min(end1, end2)
 
 def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, wfh_df, target_year, target_month, is_session_mode):
-    """Core scheduling logic with workload balancing, time-interval, WFH, and LMS/CMS daily limits."""
+    """Core scheduling logic with workload balancing, time-interval, bidirectional WFH, and LMS/CMS daily limits."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
@@ -155,18 +155,25 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                         if class_name in RESTRICTED_CMS_LMS_CLASSES:
                             if test_date in instructor_restricted_tracker.get(instructor_name, []):
                                 continue
-
-                        if str(default_location).lower() == 'online':
-                            day_of_week = test_date.weekday()
-                            if day_of_week in wfh_days_map:
-                                day_name = wfh_days_map[day_of_week]
-                                try:
-                                    instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
-                                    if not instructor_wfh_row.empty:
-                                        wfh_status = instructor_wfh_row.iloc[0][day_name]
-                                        if wfh_status != 'WFH':
-                                            continue
-                                except (KeyError, IndexError):
+                        
+                        # --- Bidirectional WFH Policy Check ---
+                        day_of_week = test_date.weekday()
+                        if day_of_week in wfh_days_map:
+                            day_name = wfh_days_map[day_of_week]
+                            try:
+                                instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
+                                if not instructor_wfh_row.empty:
+                                    wfh_status = instructor_wfh_row.iloc[0][day_name]
+                                    # Rule 1: Can't teach in-person class while WFH
+                                    if wfh_status == 'WFH' and str(default_location).lower() != 'online':
+                                        continue
+                                    # Rule 2: Must be WFH to teach an online class
+                                    if wfh_status != 'WFH' and str(default_location).lower() == 'online':
+                                        continue
+                            except (KeyError, IndexError):
+                                # If day/instructor not in WFH schedule, assume they are in office.
+                                # This means they can't teach online classes.
+                                if str(default_location).lower() == 'online':
                                     continue
 
                         is_busy = False
@@ -249,9 +256,9 @@ default_timeoff = pd.DataFrame({
     "Title": ["New Years Day", "MLK Day"],
     "Start Date": ["2027-01-01", "2026-01-18"],
     "End Date": ["2026-01-01", "2026-01-18"],
-    "Start Time": ["", "",],
+    "Start Time": ["", ""],
     "End Time": ["", ""],
-    "Instructor": [""]
+    "Instructor": ["", ""]
 })
 
 default_locations = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
@@ -279,93 +286,4 @@ if 'wfh_data' not in st.session_state:
 
 # --- UI Layout & Auto-Saving Editors ---
 colA, colB = st.columns(2)
-
-with colA:
-    st.subheader("📚 Class Catalog")
-    df_catalog = st.data_editor(st.session_state.catalog_data, num_rows="dynamic", use_container_width=True, key="catalog_editor")
-    if not df_catalog.equals(st.session_state.catalog_data):
-        st.session_state.catalog_data = df_catalog
-        save_data("catalog.csv", df_catalog)
-
-    st.subheader("🌴 Time Off & Holidays")
-    st.markdown("Add specific times for partial-day conflicts. Leave times blank for all-day events.")
-    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True, key="timeoff_editor")
-    if not df_timeoff.equals(st.session_state.timeoff_data):
-        st.session_state.timeoff_data = df_timeoff
-        save_data("timeoff.csv", df_timeoff)
-
-    st.subheader("🏠 Work From Home Schedule")
-    df_wfh = st.data_editor(st.session_state.wfh_data, num_rows="dynamic", use_container_width=True, key="wfh_editor")
-    if not df_wfh.equals(st.session_state.wfh_data):
-        st.session_state.wfh_data = df_wfh
-        save_data("wfh.csv", df_wfh)
-
-with colB:
-    st.subheader("👥 Instructor Roster")
-    df_roster = st.data_editor(st.session_state.roster_data, num_rows="dynamic", use_container_width=True, key="roster_editor")
-    if not df_roster.equals(st.session_state.roster_data):
-        st.session_state.roster_data = df_roster
-        save_data("roster.csv", df_roster)
-
-    st.subheader("🏢 Locations")
-    df_locations = st.data_editor(st.session_state.locations_data, num_rows="dynamic", use_container_width=True, key="locations_editor")
-    if not df_locations.equals(st.session_state.locations_data):
-        st.session_state.locations_data = df_locations
-        save_data("locations.csv", df_locations)
-
-# --- Sidebar & Generation ---
-st.sidebar.header("🗓️ Scheduling Controls")
-session_mode = st.sidebar.toggle("Session Mode (Mon-Fri)", value=True, help="ON = Session (Mon-Fri). OFF = Interim (Tue-Thu).")
-target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
-target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
-generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_container_width=True)
-
-st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Reset to Default Tables", use_container_width=True):
-    save_data("catalog.csv", default_catalog)
-    save_data("roster.csv", default_roster)
-    save_data("timeoff.csv", default_timeoff)
-    save_data("locations.csv", default_locations)
-    save_data("wfh.csv", default_wfh)
-
-    st.session_state.catalog_data = default_catalog.copy()
-    st.session_state.roster_data = default_roster.copy()
-    st.session_state.timeoff_data = default_timeoff.copy()
-    st.session_state.locations_data = default_locations.copy()
-    st.session_state.wfh_data = default_wfh.copy()
-    
-    st.success("All tables have been reset to their defaults!")
-    st.rerun()
-
-if generate_btn:
-    with st.spinner("Calculating optimal schedule..."):
-        schedule_df, warnings = generate_training_schedule(
-            st.session_state.catalog_data,
-            st.session_state.roster_data,
-            st.session_state.timeoff_data,
-            st.session_state.locations_data,
-            st.session_state.wfh_data,
-            target_year,
-            target_month,
-            session_mode
-        )
-
-        st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
-
-        if not schedule_df.empty:
-            mode_text = "Session Mode (Mon-Fri)" if session_mode else "Interim Mode (Tues-Thur)"
-            st.success(f"✅ Schedule successfully generated in **{mode_text}**!")
-            for w in warnings:
-                st.warning(w)
-            
-            st.dataframe(schedule_df, use_container_width=True, hide_index=True)
-            st.download_button("📥 Download as CSV", schedule_df.to_csv(index=False).encode('utf-8'), f"Training_Schedule_{target_year}_{target_month}.csv", "text/csv")
-
-            st.markdown("### ⚖️ Instructor Workload Distribution")
-            workload_summary = schedule_df['Instructor'].value_counts().reset_index()
-            workload_summary.columns = ['Instructor', 'Classes Scheduled']
-            st.dataframe(workload_summary, hide_index=True)
-        else:
-            for w in warnings:
-                st.error(w)
 
