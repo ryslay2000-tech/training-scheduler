@@ -120,7 +120,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker[class_name]:
                 continue
 
-            preferred_start_times = [(9, 0), (10, 0), (13, 0), (14, 0)]
+            preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
             random.shuffle(preferred_start_times)
 
             for start_hour, start_minute in preferred_start_times:
