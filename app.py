@@ -73,7 +73,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     class_week_tracker = defaultdict(set)
     
     # --- LMS/CMS Single-Day Constraint Tracker ---
-    RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online", "CMS Online", "CMS"}
+    RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online","LMS Online", "CMS Online", "CMS"}
     instructor_restricted_tracker = defaultdict(set)
 
     final_schedule = []
