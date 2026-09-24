@@ -33,7 +33,7 @@ def check_overlap(start1, end1, start2, end2):
     return max(start1, start2) < min(end1, end2)
 
 def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, wfh_df, target_year, target_month, is_session_mode):
-    """Core scheduling logic with workload balancing, time-interval, WFH, and LMS/CMS daily limits."""
+    """Core scheduling logic with time-interval, WFH, and LMS/CMS daily limit conflict resolution."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
@@ -54,15 +54,16 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             general_holidays.add(row['StartDate'] + timedelta(days=i))
 
     if is_session_mode:
-        allowed_weekdays = [0, 1, 2, 3, 4]
+        allowed_weekdays = [0, 1, 2, 3, 4]  # Mon-Fri
     else:
-        allowed_weekdays = [1, 2, 3]
+        allowed_weekdays = [1, 2, 3]  # Tue-Thu
 
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
     if not workdays:
         return pd.DataFrame(), ["No available workdays found for the selected mode and month."]
 
+    # Prepare WFH data for quick lookup
     wfh_days_map = {0: 'MONDAY', 1: 'TUESDAY', 2: 'WEDNESDAY', 3: 'THURSDAY', 4: 'FRIDAY'}
 
     # Trackers
@@ -70,12 +71,10 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     instructor_availability = defaultdict(list)
     class_day_tracker = defaultdict(set)
     class_week_tracker = defaultdict(set)
+    
+    # --- LMS/CMS Single-Day Constraint Tracker ---
     RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online","LMS Online", "CMS Online", "CMS"}
     instructor_restricted_tracker = defaultdict(set)
-
-    # --- Workload Balancing Tracker ---
-    all_instructors = instructor_roster_df['Title'].dropna().unique().tolist()
-    instructor_load_count = {name: 0 for name in all_instructors}
 
     final_schedule = []
     class_dict = {}
@@ -107,56 +106,41 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             warnings.append(f"Could not find details for class '{class_name}'.")
             continue
 
-        qualified_instructors_base = instructor_roster_df[instructor_roster_df['QualifiedClasses'].str.contains(class_name, na=False)].copy()
-        if qualified_instructors_base.empty:
-            warnings.append(f"No qualified instructors found for '{class_name}'.")
-            continue
+        qualified_instructors = instructor_roster_df[instructor_roster_df['QualifiedClasses'].str.contains(class_name, na=False)].copy()
+        qualified_instructors = qualified_instructors.sample(frac=1).reset_index(drop=True)
 
         shuffled_workdays = workdays.copy()
         random.shuffle(shuffled_workdays)
 
-        for strict_balance in [True, False]:
+        for test_date in shuffled_workdays:
             if session_scheduled:
                 break
-            for test_date in shuffled_workdays:
-                if session_scheduled:
-                    break
-                if test_date in class_day_tracker[class_name]:
+            if test_date in class_day_tracker[class_name]:
+                continue
+            if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker[class_name]:
+                continue
+
+            preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
+            random.shuffle(preferred_start_times)
+
+            for start_hour, start_minute in preferred_start_times:
+                start_time = datetime.combine(test_date, datetime.min.time()).replace(hour=start_hour, minute=start_minute)
+                end_time = start_time + timedelta(hours=duration_hours)
+
+                if any(check_overlap(start_time, end_time, bs, be) for bs, be in location_availability.get(default_location, [])):
                     continue
-                if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker.get(class_name, []):
-                    continue
-                
-                preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
-                random.shuffle(preferred_start_times)
-                
-                for start_hour, start_minute in preferred_start_times:
-                    if session_scheduled:
-                        break
-                    start_time = datetime.combine(test_date, datetime.min.time()).replace(hour=start_hour, minute=start_minute)
-                    end_time = start_time + timedelta(hours=duration_hours)
 
-                    if any(check_overlap(start_time, end_time, bs, be) for bs, be in location_availability.get(default_location, [])):
-                        continue
+                for _, instructor in qualified_instructors.iterrows():
+                    instructor_name = instructor['Title']
+                    instructor_full_name = instructor['Email Address']
 
-                    qualified_instructors = qualified_instructors_base.copy()
-                    qualified_instructors['current_load'] = qualified_instructors['Title'].map(instructor_load_count).fillna(0)
-                    qualified_instructors['random_tie'] = [random.random() for _ in range(len(qualified_instructors))]
-                    qualified_instructors = qualified_instructors.sort_values(by=['current_load', 'random_tie']).reset_index(drop=True)
+                    # --- LMS / CMS Same-Day Check ---
+                    if class_name in RESTRICTED_CMS_LMS_CLASSES:
+                        if test_date in instructor_restricted_tracker[instructor_name]:
+                            continue  # Instructor is already teaching an LMS/CMS class today
 
-                    for _, instructor in qualified_instructors.iterrows():
-                        instructor_name = instructor['Title']
-                        instructor_full_name = instructor['Email Address']
-
-                        if strict_balance:
-                            min_load = min(instructor_load_count.values()) if instructor_load_count else 0
-                            if instructor_load_count.get(instructor_name, 0) >= (min_load + 3):
-                                continue
-
-                        if class_name in RESTRICTED_CMS_LMS_CLASSES:
-                            if test_date in instructor_restricted_tracker.get(instructor_name, []):
-                                continue
-
-                        # --- Bidirectional WFH Policy Check ---
+                    # --- WFH Policy Check for Online Classes ---
+                    if str(default_location).lower() == 'online':
                         day_of_week = test_date.weekday()
                         if day_of_week in wfh_days_map:
                             day_name = wfh_days_map[day_of_week]
@@ -164,60 +148,57 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
                                 if not instructor_wfh_row.empty:
                                     wfh_status = instructor_wfh_row.iloc[0][day_name]
-                                    # Rule 1: Can't teach in-person class while WFH
-                                    if wfh_status == 'WFH' and str(default_location).lower() != 'online':
-                                        continue
-                                    # Rule 2: Must be WFH to teach an online class
-                                    if wfh_status != 'WFH' and str(default_location).lower() == 'online':
-                                        continue
+                                    if wfh_status != 'WFH':
+                                        continue  # Can't teach online if not WFH
                             except (KeyError, IndexError):
-                                # If day/instructor not in WFH schedule, assume they are in office.
-                                # This means they can't teach online classes.
-                                if str(default_location).lower() == 'online':
-                                    continue
-                        
-                        is_busy = False
-                        if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
-                            is_busy = True
-                            continue
+                                continue
 
-                        instructor_time_off = time_off_df[time_off_df['Instructor'] == instructor_full_name]
-                        for _, leave in instructor_time_off.iterrows():
-                            if leave['StartDate'] <= test_date <= leave['EndDate']:
-                                if pd.isna(leave['Start Time']) or leave['Start Time'] in ['nan', '']:
+                    # --- Granular Time-Off Check ---
+                    is_busy = False
+                    if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
+                        is_busy = True
+                        continue
+
+                    instructor_time_off = time_off_df[time_off_df['Instructor'] == instructor_full_name]
+                    for _, leave in instructor_time_off.iterrows():
+                        if leave['StartDate'] <= test_date <= leave['EndDate']:
+                            if pd.isna(leave['Start Time']) or leave['Start Time'] in ['nan', '']:
+                                is_busy = True
+                                break
+                            try:
+                                leave_start = datetime.strptime(leave['Start Time'], '%I:%M %p').time()
+                                leave_end = datetime.strptime(leave['End Time'], '%I:%M %p').time()
+                                leave_start_dt = datetime.combine(test_date, leave_start)
+                                leave_end_dt = datetime.combine(test_date, leave_end)
+                                if check_overlap(start_time, end_time, leave_start_dt, leave_end_dt):
                                     is_busy = True
                                     break
-                                try:
-                                    leave_start = datetime.strptime(leave['Start Time'], '%I:%M %p').time()
-                                    leave_end = datetime.strptime(leave['End Time'], '%I:%M %p').time()
-                                    leave_start_dt = datetime.combine(test_date, leave_start)
-                                    leave_end_dt = datetime.combine(test_date, leave_end)
-                                    if check_overlap(start_time, end_time, leave_start_dt, leave_end_dt):
-                                        is_busy = True
-                                        break
-                                except (ValueError, TypeError):
-                                    continue
-                        
-                        if not is_busy:
-                            final_schedule.append({
-                                'Date': test_date,
-                                'Start Time': start_time.strftime('%I:%M %p'),
-                                'End Time': end_time.strftime('%I:%M %p'),
-                                'Class': class_name,
-                                'Instructor': instructor_name,
-                                'Location': default_location
-                            })
-                            instructor_availability[instructor_name].append((start_time, end_time))
-                            location_availability[default_location].append((start_time, end_time))
-                            class_day_tracker[class_name].add(test_date)
-                            class_week_tracker[class_name].add(test_date.isocalendar()[1])
-                            instructor_load_count[instructor_name] += 1
-                            
-                            if class_name in RESTRICTED_CMS_LMS_CLASSES:
-                                instructor_restricted_tracker[instructor_name].add(test_date)
-                            
-                            session_scheduled = True
-                            break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if not is_busy:
+                        final_schedule.append({
+                            'Date': test_date,
+                            'Start Time': start_time.strftime('%I:%M %p'),
+                            'End Time': end_time.strftime('%I:%M %p'),
+                            'Class': class_name,
+                            'Instructor': instructor_name,
+                            'Location': default_location
+                        })
+                        instructor_availability[instructor_name].append((start_time, end_time))
+                        location_availability[default_location].append((start_time, end_time))
+                        class_day_tracker[class_name].add(test_date)
+                        class_week_tracker[class_name].add(test_date.isocalendar()[1])
+
+                        # Record restricted class assignment
+                        if class_name in RESTRICTED_CMS_LMS_CLASSES:
+                            instructor_restricted_tracker[instructor_name].add(test_date)
+
+                        session_scheduled = True
+                        break
+
+                if session_scheduled:
+                    break
 
         if not session_scheduled:
             warnings.append(f"Could not find a non-conflicting slot for an instance of '{class_name}'.")
@@ -231,7 +212,6 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     df['Date'] = df['Date_sort'].dt.strftime('%Y-%m-%d')
     df = df.sort_values(by=['Date_sort', 'Start Time sort']).drop(columns=['Start Time sort', 'Date_sort'])
     return df, warnings
-
 
 # --- Streamlit Web App Interface ---
 st.set_page_config(page_title="TLC Training Scheduler", page_icon="📅", layout="wide")
@@ -327,23 +307,6 @@ target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2
 target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
 generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_container_width=True)
 
-st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Reset to Default Tables", use_container_width=True):
-    save_data("catalog.csv", default_catalog)
-    save_data("roster.csv", default_roster)
-    save_data("timeoff.csv", default_timeoff)
-    save_data("locations.csv", default_locations)
-    save_data("wfh.csv", default_wfh)
-
-    st.session_state.catalog_data = default_catalog.copy()
-    st.session_state.roster_data = default_roster.copy()
-    st.session_state.timeoff_data = default_timeoff.copy()
-    st.session_state.locations_data = default_locations.copy()
-    st.session_state.wfh_data = default_wfh.copy()
-    
-    st.success("All tables have been reset to their defaults!")
-    st.rerun()
-
 if generate_btn:
     with st.spinner("Calculating optimal schedule..."):
         schedule_df, warnings = generate_training_schedule(
@@ -364,14 +327,9 @@ if generate_btn:
             st.success(f"✅ Schedule successfully generated in **{mode_text}**!")
             for w in warnings:
                 st.warning(w)
-            
             st.dataframe(schedule_df, use_container_width=True, hide_index=True)
             st.download_button("📥 Download as CSV", schedule_df.to_csv(index=False).encode('utf-8'), f"Training_Schedule_{target_year}_{target_month}.csv", "text/csv")
-
-            st.markdown("### ⚖️ Instructor Workload Distribution")
-            workload_summary = schedule_df['Instructor'].value_counts().reset_index()
-            workload_summary.columns = ['Instructor', 'Classes Scheduled']
-            st.dataframe(workload_summary, hide_index=True)
         else:
             for w in warnings:
                 st.error(w)
+
