@@ -11,8 +11,8 @@ def check_overlap(start1, end1, start2, end2):
     """Checks if two time intervals overlap."""
     return max(start1, start2) < min(end1, end2)
 
-def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, target_year, target_month, is_session_mode):
-    """Core scheduling logic with time-interval conflict resolution."""
+def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, wfh_df, target_year, target_month, is_session_mode):
+    """Core scheduling logic with time-interval and WFH conflict resolution."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
@@ -37,16 +37,21 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         allowed_weekdays = [1, 2, 3]
 
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
-    
+
     if not workdays:
         return pd.DataFrame(), ["No available workdays found for the selected mode and month."]
+
+    # Prepare WFH data for quick lookup
+    wfh_lookup = wfh_df.set_index(wfh_df.columns[0]).T.to_dict('list')
+    wfh_days_map = {0: 'MONDAY', 1: 'TUESDAY', 2: 'WEDNESDAY', 3: 'THURSDAY', 4: 'FRIDAY'}
+
 
     location_availability = defaultdict(list)
     instructor_availability = defaultdict(list)
     class_day_tracker = defaultdict(set)
     class_week_tracker = defaultdict(set)
     final_schedule = []
-    
+
     class_dict = {}
     for _, row in class_catalog_df.iterrows():
         try:
@@ -74,7 +79,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         except (IndexError, ValueError):
             warnings.append(f"Could not find details for class '{class_name}'.")
             continue
-            
+
         qualified_instructors = instructor_roster_df[instructor_roster_df['QualifiedClasses'].str.contains(class_name, na=False)].copy()
         qualified_instructors = qualified_instructors.sample(frac=1).reset_index(drop=True)
 
@@ -88,7 +93,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 continue
             if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker[class_name]:
                 continue
-            
+
             preferred_start_times = [(9, 0), (10, 0), (13, 0), (14, 0)]
             random.shuffle(preferred_start_times)
 
@@ -101,9 +106,26 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
 
                 for _, instructor in qualified_instructors.iterrows():
                     instructor_name = instructor['Title']
-                    instructor_full_name = instructor['Email Address'] 
-                    
-                    # --- NEW: Granular time-off check ---
+                    instructor_full_name = instructor['Email Address']
+
+                    # --- NEW: WFH Policy Check for Online Classes ---
+                    if str(default_location).lower() == 'online':
+                        day_of_week = test_date.weekday()
+                        if day_of_week in wfh_days_map: # Check only on weekdays
+                            day_name = wfh_days_map[day_of_week]
+                            try:
+                                # Find instructor's row and check the status for the day
+                                instructor_wfh_row = wfh_df[wfh_df.iloc[:, 0] == instructor_name]
+                                if not instructor_wfh_row.empty:
+                                    wfh_status = instructor_wfh_row.iloc[0][day_name]
+                                    if wfh_status != 'WFH':
+                                        continue # Skip: Can't teach online if not WFH
+                            except (KeyError, IndexError):
+                                # If instructor or day not in schedule, assume they can't teach online
+                                continue
+
+
+                    # --- Granular time-off check ---
                     is_busy = False
                     # Check against previously scheduled classes
                     if any(check_overlap(start_time, end_time, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
@@ -114,21 +136,16 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                     instructor_time_off = time_off_df[time_off_df['Instructor'] == instructor_full_name]
                     for _, leave in instructor_time_off.iterrows():
                         if leave['StartDate'] <= test_date <= leave['EndDate']:
-                            # If no specific time, it's an all-day event
                             if pd.isna(leave['Start Time']) or leave['Start Time'] in ['nan', '']:
-                                is_busy = True
-                                break
-                            # Otherwise, check for specific time overlap
+                                is_busy = True; break
                             try:
                                 leave_start = datetime.strptime(leave['Start Time'], '%I:%M %p').time()
                                 leave_end = datetime.strptime(leave['End Time'], '%I:%M %p').time()
                                 leave_start_dt = datetime.combine(test_date, leave_start)
                                 leave_end_dt = datetime.combine(test_date, leave_end)
                                 if check_overlap(start_time, end_time, leave_start_dt, leave_end_dt):
-                                    is_busy = True
-                                    break
-                            except (ValueError, TypeError):
-                                continue # Ignore badly formatted times
+                                    is_busy = True; break
+                            except (ValueError, TypeError): continue
 
                     if not is_busy:
                         final_schedule.append({
@@ -140,7 +157,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                         location_availability[default_location].append((start_time, end_time))
                         class_day_tracker[class_name].add(test_date)
                         class_week_tracker[class_name].add(test_date.isocalendar()[1])
-                        
+
                         session_scheduled = True
                         break
                 if session_scheduled: break
@@ -155,8 +172,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     df['Start Time sort'] = pd.to_datetime(df['Start Time'], format='%I:%M %p').dt.time
     df['Date'] = df['Date_sort'].dt.strftime('%Y-%m-%d')
     df = df.sort_values(by=['Date_sort', 'Start Time sort']).drop(columns=['Start Time sort', 'Date_sort'])
-    
+
     return df, warnings
+
 
 # --- Streamlit Web App Interface ---
 st.set_page_config(page_title="TLC Training Scheduler", page_icon="📅", layout="wide")
@@ -165,13 +183,16 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 
 # --- Default Data Definitions ---
 if 'catalog_data' not in st.session_state:
-    st.session_state.catalog_data = pd.DataFrame({ "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps"], "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1], "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5], "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "SHB 835"] })
+    st.session_state.catalog_data = pd.DataFrame({ "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps"], "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1], "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5], "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "Online"] })
 if 'roster_data' not in st.session_state:
     st.session_state.roster_data = pd.DataFrame({ "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"], "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"], "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams, Outlook, Excel Formulas", "CapCentral, Texas Leg Apps", "CapCentral, TLIS, Word, Excel, Outlook", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible", "TLIS, CMS, Texas Leg Apps"] })
 if 'timeoff_data' not in st.session_state:
-    st.session_state.timeoff_data = pd.DataFrame({ "Title": ["Juneteenth (Example)", "Joel - Out (All Day)", "Jeb - Meeting"], "Start Date": ["2026-06-19", "2026-06-04", "2026-06-10"], "End Date": ["2026-06-19", "2026-06-09", "2026-06-10"], "Start Time": ["", "", "10:00 AM"], "End Time": ["", "", "11:00 AM"], "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jeb.Callan@tlc.texas.gov"] })
+    st.session_state.timeoff_data = pd.DataFrame({ "Title": ["Juneteenth (Example)", "Joel - Out (All Day)", "Jeb - Meeting"], "Start Date": ["2026-06-19", "2026-06-04", "2026-06-09"], "End Date": ["2026-06-19", "2026-06-09", "2026-06-10"], "Start Time": ["", "", "10:00 AM"], "End Time": ["", "", "11:00 AM"], "Instructor": ["", "Joel.Corral@tlc.texas.gov", "Jeb.Callan@tlc.texas.gov"] })
 if 'locations_data' not in st.session_state:
     st.session_state.locations_data = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
+# --- NEW: Add WFH schedule data ---
+if 'wfh_data' not in st.session_state:
+    st.session_state.wfh_data = pd.DataFrame({ "Instructor": ["Jamila", "Jeb", "Joel", "Lisa", "Ryan"], "MONDAY": ["Office", "WFH", "WFH", "Office", "WFH"], "TUESDAY": ["Office", "Office", "Office", "Office", "Office"], "WEDNESDAY": ["Office", "Office", "Office", "Office", "WFH"], "THURSDAY": ["WFH", "Office", "WFH", "WFH", "Office"], "FRIDAY": ["WFH", "WFH", "Office", "WFH", "Office"]})
 
 # --- UI Layout ---
 colA, colB = st.columns(2)
@@ -181,6 +202,10 @@ with colA:
     st.subheader("🌴 Time Off & Holidays")
     st.markdown("Add specific times for partial-day conflicts. Leave times blank for all-day events.")
     df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True, column_config={"Instructor": st.column_config.TextColumn("Instructor (Email)")})
+    # --- NEW: Display WFH schedule editor ---
+    st.subheader("🏠 Work From Home Schedule")
+    df_wfh = st.data_editor(st.session_state.wfh_data, num_rows="dynamic", use_container_width=True)
+
 with colB:
     st.subheader("👥 Instructor Roster")
     df_roster = st.data_editor(st.session_state.roster_data, num_rows="dynamic", use_container_width=True)
@@ -195,9 +220,10 @@ generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_c
 
 if generate_btn:
     with st.spinner("Calculating optimal schedule..."):
-        st.session_state.catalog_data, st.session_state.roster_data, st.session_state.timeoff_data, st.session_state.locations_data = df_catalog, df_roster, df_timeoff, df_locations
-        schedule_df, warnings = generate_training_schedule(df_catalog, df_roster, df_timeoff, df_locations, target_year, target_month, session_mode)
-        
+        # --- NEW: Pass the WFH dataframe to the scheduler ---
+        st.session_state.catalog_data, st.session_state.roster_data, st.session_state.timeoff_data, st.session_state.locations_data, st.session_state.wfh_data = df_catalog, df_roster, df_timeoff, df_locations, df_wfh
+        schedule_df, warnings = generate_training_schedule(df_catalog, df_roster, df_timeoff, df_locations, df_wfh, target_year, target_month, session_mode)
+
         st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
         if not schedule_df.empty:
             mode_text = "Session Mode (Mon-Fri)" if session_mode else "Interim Mode (Tues-Thur)"
