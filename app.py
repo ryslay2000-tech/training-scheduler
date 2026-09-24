@@ -220,10 +220,10 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 
 # --- Default Fallback Data Definitions ---
 default_catalog = pd.DataFrame({
-    "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps", "LMS-S", "LMS-H", "LMS-C", "LMS-C Online", "CMS Online"],
-    "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1],
-    "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5, 1.5, 1.5, 1.5, 1.5, 2.0],
-    "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "Online", "SHB 835", "SHB 865", "SHB 835", "Online", "Online"]
+    "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "TLA", "TLA Online", "Word ADA", "Word ADA Online"],
+    "Frequency": [8,4,8,4,8,8,4,4,2,8,8,4,8,4,4,2],
+    "Duration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0],
+    "Default Location": ["SHB 835", "Online", "SHB 865", "Online", "JHR G11", "SHB 835", "SHB 865", "Online", "Online", "SHB 865", "JHR G10", "Online", "JHR G11", "Online", "JHR G10", "Online"]
 })
 
 default_roster = pd.DataFrame({
