@@ -73,7 +73,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     class_week_tracker = defaultdict(set)
     
     # --- LMS/CMS Single-Day Constraint Tracker ---
-    RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online","LMS Online", "CMS Online", "CMS"}
+    RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online", "CMS Online", "CMS"}
     instructor_restricted_tracker = defaultdict(set)
 
     final_schedule = []
@@ -120,7 +120,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker[class_name]:
                 continue
 
-            preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
+            preferred_start_times = [(9, 0), (10, 0), (13, 0), (14, 0)]
             random.shuffle(preferred_start_times)
 
             for start_hour, start_minute in preferred_start_times:
@@ -220,16 +220,16 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 
 # --- Default Fallback Data Definitions ---
 default_catalog = pd.DataFrame({
-    "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "TLA", "TLA Online", "Word ADA", "Word ADA Online"],
-    "Frequency": [8,4,8,4,8,8,4,4,2,8,8,4,8,4,4,2],
-    "Duration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0],
-    "Default Location": ["SHB 835", "Online", "SHB 865", "Online", "JHR G11", "SHB 835", "SHB 865", "Online", "Online", "SHB 865", "JHR G10", "Online", "JHR G11", "Online", "JHR G10", "Online"]
+    "Title": ["CapCentral", "CMS", "TLIS", "Excel", "Word", "Teams", "Making Word Docs Accessible", "Making Adobe PDF Docs Accessible", "Outlook", "Excel Formulas", "Texas Leg Apps", "LMS-S", "LMS-H", "LMS-C", "LMS-C Online", "CMS Online"],
+    "Frequency": [2, 2, 2, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1],
+    "Duration": [1.0, 2.0, 2.0, 2.0, 1.5, 1.0, 1.5, 3.0, 1.5, 2.0, 0.5, 1.5, 1.5, 1.5, 1.5, 2.0],
+    "Default Location": ["SHB 865", "SHB 835", "SHB 835", "JHR G11", "SHB 835", "JHR G11", "SHB 835", "SHB 835", "SHB 865", "JHR G11", "Online", "SHB 835", "SHB 865", "SHB 835", "Online", "Online"]
 })
 
 default_roster = pd.DataFrame({
-      "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
+    "Title": ["Jeb", "Joel", "Lisa", "Ryan", "Jamila"],
     "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "Ryan.Slaymaker@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"],
-    "QualifiedClasses": ["CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online"]
+    "QualifiedClasses": ["CapCentral, CMS, TLIS, Excel, Word, Teams, Outlook, Excel Formulas, LMS-S, LMS-H, LMS-C, CMS Online, LMS-C Online", "CapCentral, Texas Leg Apps, LMS-S, LMS-H", "CapCentral, TLIS, Word, Excel, Outlook, LMS-C", "Making Word Docs Accessible, Making Adobe PDF Docs Accessible", "TLIS, CMS, Texas Leg Apps, CMS Online"]
 })
 
 default_timeoff = pd.DataFrame({
