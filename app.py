@@ -52,7 +52,11 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         for i in range((row['EndDate'] - row['StartDate']).days + 1):
             general_holidays.add(row['StartDate'] + timedelta(days=i))
 
-    allowed_weekdays = if is_session_mode else
+    if is_session_mode:
+        allowed_weekdays =
+    else:
+        allowed_weekdays =
+
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
     if not workdays:
@@ -324,6 +328,4 @@ if generate_btn:
                 st.warning(w)
             st.dataframe(schedule_df, use_container_width=True, hide_index=True)
             st.download_button("📥 Download as CSV", schedule_df.to_csv(index=False).encode('utf-8'), f"Training_Schedule_{target_year}_{target_month}.csv", "text/csv")
-        else:
-            for w in warnings:
-                st.error(w)
+       
