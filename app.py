@@ -289,7 +289,7 @@ with colA:
 
     st.subheader("🌴 Time Off & Holidays")
     st.markdown("Add specific times for partial-day conflicts. Leave times blank for all-day events.")
-    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True, key="timeoff_editor", column_config={"Instructor": st.column_config.TextColumn("Instructor (Email)")})
+    df_timeoff = st.data_editor(st.session_state.timeoff_data, num_rows="dynamic", use_container_width=True, key="timeoff_editor")
     if not df_timeoff.equals(st.session_state.timeoff_data):
         st.session_state.timeoff_data = df_timeoff
         save_data("timeoff.csv", df_timeoff)
