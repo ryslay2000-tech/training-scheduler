@@ -270,7 +270,7 @@ default_timeoff = pd.DataFrame({
 default_locations = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
 
 default_wfh = pd.DataFrame({
-    "Instructor": ["Jamila", "Jeb", "Joel", "Lisa", "Ryan"],
+    "Instructor": ["Jamila", "Jeb", "Joel", "Lisa", "PAT"],
     "MONDAY": ["Office", "WFH", "WFH", "Office", "WFH"],
     "TUESDAY": ["Office", "Office", "Office", "Office", "Office"],
     "WEDNESDAY": ["Office", "Office", "Office", "Office", "WFH"],
