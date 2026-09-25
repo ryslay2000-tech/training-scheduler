@@ -247,7 +247,7 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 # --- Default Fallback Data Definitions ---
 default_catalog = pd.DataFrame({
     "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "TLA", "TLA Online", "Word ADA", "Word ADA Online", "CapCentral", "CapCentral Online"],
-    "Frequency": [8,4,8,4,8,8,4,4,2,8,8,4,8,4,4,2],
+    "Frequency": [8,4,8,4,8,8,4,4,2,8,8,4,8,4,4,2,1,1],
     "Duration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
     "Default Location": ["SHB 835", "Online", "SHB 865", "Online", "JHR G11", "SHB 835", "SHB 865", "Online", "Online", "SHB 865", "JHR G10", "Online", "JHR G11", "Online", "JHR G10", "Online", "SHB 835", "Online"]
 })
