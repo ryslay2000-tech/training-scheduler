@@ -34,7 +34,7 @@ def check_overlap(start1, end1, start2, end2):
     """Checks if two time intervals overlap."""
     return max(start1, start2) < min(end1, end2)
 
-def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, wfh_df, target_year, target_month, is_session_mode):
+def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, wfh_df, target_year, target_month, is_session_mode, max_daily_cap=3):
     """Core scheduling logic with workload balancing, time-interval, bidirectional WFH, LMS/CMS limits, and daily class balancing."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
@@ -57,9 +57,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 general_holidays.add(row['StartDate'] + timedelta(days=i))
 
     if is_session_mode:
-        allowed_weekdays =
+        allowed_weekdays = [0, 1, 2, 3, 4]
     else:
-        allowed_weekdays =
+        allowed_weekdays = [1, 2, 3]
 
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
@@ -134,10 +134,13 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 if class_frequency <= 4 and test_date.isocalendar() in class_week_tracker.get(class_name, []):
                     continue
 
-                # Strict Daily Balance: Avoid scheduling on busy days if lighter days are available
+                # Hard Cap & Strict Daily Balance: Avoid scheduling on busy days if lighter days are available
+                if daily_class_tracker[test_date] >= max_daily_cap:
+                    continue
+
                 if strict_balance:
                     min_daily_load = min(daily_class_tracker.values()) if daily_class_tracker else 0
-                    if daily_class_tracker[test_date] >= (min_daily_load + 2):
+                    if daily_class_tracker[test_date] >= (min_daily_load + 1):
                         continue
 
                 preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
@@ -256,7 +259,7 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 # --- Default Fallback Data Definitions ---
 default_catalog = pd.DataFrame({
     "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "TLA", "TLA Online", "Word ADA", "Word ADA Online", "CapCentral", "CapCentral Online"],
-    "Frequency":,
+    "Frequency": [8,4,8,4,8,8,4,4,2,8,8,4,8,4,4,2,1,1],
     "Duration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
     "Default Location": ["SHB 835", "Online", "SHB 865", "Online", "JHR G11", "SHB 835", "SHB 865", "Online", "Online", "SHB 865", "JHR G10", "Online", "JHR G11", "Online", "JHR G10", "Online", "SHB 835", "Online"]
 })
@@ -340,6 +343,10 @@ st.sidebar.header("🗓️ Scheduling Controls")
 session_mode = st.sidebar.toggle("Session Mode (Mon-Fri)", value=True, help="ON = Session (Mon-Fri). OFF = Interim (Tue-Thu).")
 target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
 target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
+
+# Max Daily Class Cap Slider
+max_daily_cap = st.sidebar.slider("Max Classes per Day", min_value=1, max_value=6, value=3, help="Enforces a maximum threshold of classes scheduled on any single day.")
+
 generate_btn = st.sidebar.button("🚀 Generate Schedule", type="primary", use_container_width=True)
 
 st.sidebar.markdown("---")
@@ -368,7 +375,8 @@ if generate_btn:
             st.session_state.wfh_data,
             target_year,
             target_month,
-            session_mode
+            session_mode,
+            max_daily_cap=max_daily_cap
         )
         st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
 
