@@ -20,7 +20,6 @@ def load_or_init_data(filename: str, default_df: pd.DataFrame) -> pd.DataFrame:
         try:
             return pd.read_csv(filepath)
         except Exception:
-            # If file is corrupted or empty, overwrite with default
             pass
     default_df.to_csv(filepath, index=False)
     return default_df
@@ -36,7 +35,7 @@ def check_overlap(start1, end1, start2, end2):
     return max(start1, start2) < min(end1, end2)
 
 def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_df, locations_df, wfh_df, target_year, target_month, is_session_mode):
-    """Core scheduling logic with workload balancing, time-interval, bidirectional WFH, and LMS/CMS daily limits."""
+    """Core scheduling logic with workload balancing, time-interval, bidirectional WFH, LMS/CMS limits, and daily class balancing."""
     locations = locations_df['Locations'].unique().tolist()
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
@@ -58,9 +57,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                 general_holidays.add(row['StartDate'] + timedelta(days=i))
 
     if is_session_mode:
-        allowed_weekdays = [0, 1, 2, 3, 4]
+        allowed_weekdays =
     else:
-        allowed_weekdays = [1, 2, 3]
+        allowed_weekdays =
 
     workdays = [d for d in month_days if d.weekday() in allowed_weekdays and d not in general_holidays]
 
@@ -76,6 +75,9 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     class_week_tracker = defaultdict(set)
     RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online","LMS Online", "CMS Online", "CMS"}
     instructor_restricted_tracker = defaultdict(set)
+    
+    # --- Daily Workload Tracker ---
+    daily_class_tracker = {d: 0 for d in workdays}
 
     # --- Workload Balancing Tracker ---
     all_instructors = instructor_roster_df['Title'].dropna().unique().tolist()
@@ -100,6 +102,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
         classes_to_schedule.extend(round_i)
 
     warnings = []
+
     for class_name in classes_to_schedule:
         session_scheduled = False
         try:
@@ -116,26 +119,34 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             warnings.append(f"No qualified instructors found for '{class_name}'.")
             continue
 
-        shuffled_workdays = workdays.copy()
-        random.shuffle(shuffled_workdays)
+        # Sort candidate days dynamically by current load, adding a random tie-breaker
+        candidate_workdays = sorted(workdays, key=lambda d: (daily_class_tracker[d], random.random()))
 
         for strict_balance in [True, False]:
             if session_scheduled:
                 break
-            for test_date in shuffled_workdays:
+
+            for test_date in candidate_workdays:
                 if session_scheduled:
                     break
                 if test_date in class_day_tracker[class_name]:
                     continue
-                if class_frequency <= 4 and test_date.isocalendar()[1] in class_week_tracker.get(class_name, []):
+                if class_frequency <= 4 and test_date.isocalendar() in class_week_tracker.get(class_name, []):
                     continue
-                
+
+                # Strict Daily Balance: Avoid scheduling on busy days if lighter days are available
+                if strict_balance:
+                    min_daily_load = min(daily_class_tracker.values()) if daily_class_tracker else 0
+                    if daily_class_tracker[test_date] >= (min_daily_load + 2):
+                        continue
+
                 preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
                 random.shuffle(preferred_start_times)
-                
+
                 for start_hour, start_minute in preferred_start_times:
                     if session_scheduled:
                         break
+
                     start_time = datetime.combine(test_date, datetime.min.time()).replace(hour=start_hour, minute=start_minute)
                     end_time = start_time + timedelta(hours=duration_hours)
 
@@ -159,7 +170,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                         if class_name in RESTRICTED_CMS_LMS_CLASSES:
                             if test_date in instructor_restricted_tracker.get(instructor_name, []):
                                 continue
-                        
+
                         # --- Bidirectional WFH Policy Check ---
                         day_of_week = test_date.weekday()
                         if day_of_week in wfh_days_map:
@@ -176,11 +187,11 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                             except (KeyError, IndexError):
                                 if str(default_location).strip().lower() == 'online':
                                     continue
-                        
+
                         # --- Instructor Availability Check with 30-Min Buffer ---
                         candidate_start_buffered = start_time - timedelta(minutes=30)
                         candidate_end_buffered = end_time + timedelta(minutes=30)
-                        
+
                         is_busy = False
                         if any(check_overlap(candidate_start_buffered, candidate_end_buffered, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                             is_busy = True
@@ -202,9 +213,8 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                         break
                                 except (ValueError, TypeError):
                                     continue
-                        
+
                         if not is_busy:
-                            # Store actual class times in the final schedule
                             final_schedule.append({
                                 'Date': test_date,
                                 'Start Time': start_time.strftime('%I:%M %p'),
@@ -213,16 +223,16 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 'Instructor': instructor_name,
                                 'Location': default_location
                             })
-                            # Store the buffered window for the instructor's availability
                             instructor_availability[instructor_name].append((candidate_start_buffered, candidate_end_buffered))
-                            location_availability[default_location].append((start_time, end_time)) # Location is only busy for actual class time
+                            location_availability[default_location].append((start_time, end_time))
                             class_day_tracker[class_name].add(test_date)
-                            class_week_tracker[class_name].add(test_date.isocalendar()[1])
+                            class_week_tracker[class_name].add(test_date.isocalendar())
                             instructor_load_count[instructor_name] += 1
-                            
+                            daily_class_tracker[test_date] += 1
+
                             if class_name in RESTRICTED_CMS_LMS_CLASSES:
                                 instructor_restricted_tracker[instructor_name].add(test_date)
-                            
+
                             session_scheduled = True
                             break
 
@@ -239,7 +249,6 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     df = df.sort_values(by=['Date_sort', 'Start Time sort']).drop(columns=['Start Time sort', 'Date_sort'])
     return df, warnings
 
-
 # --- UI Title ---
 st.title("📅 TLC Monthly Training Scheduler")
 st.markdown("Edit your data, select your scheduling mode, then click generate.")
@@ -247,7 +256,7 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 # --- Default Fallback Data Definitions ---
 default_catalog = pd.DataFrame({
     "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "TLA", "TLA Online", "Word ADA", "Word ADA Online", "CapCentral", "CapCentral Online"],
-    "Frequency": [8,4,8,4,8,8,4,4,2,8,8,4,8,4,4,2,1,1],
+    "Frequency":,
     "Duration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
     "Default Location": ["SHB 835", "Online", "SHB 865", "Online", "JHR G11", "SHB 835", "SHB 865", "Online", "Online", "SHB 865", "JHR G10", "Online", "JHR G11", "Online", "JHR G10", "Online", "SHB 835", "Online"]
 })
@@ -255,7 +264,7 @@ default_catalog = pd.DataFrame({
 default_roster = pd.DataFrame({
     "Title": ["Jeb", "Joel", "Lisa", "PAT", "Jamila"],
     "Email Address": ["Jeb.Callan@tlc.texas.gov", "Joel.Corral@tlc.texas.gov", "Lisa.Flores@tlc.texas.gov", "PAT@tlc.texas.gov", "Jamila.Shaw@tlc.texas.gov"],
-    "QualifiedClasses": ["CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online, CapCentral, CapCentral Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online, CapCentral, CapCentral Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online, CapCentral, CapCentral Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online, CapCentral, CapCentral Online", "CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online, CapCentral, CapCentral Online"]
+    "QualifiedClasses": ["CMS, CMS Online, TLIS, TLIS Online, LMS-H, LMS-S, LMS-C, LMS Online, LMS-C Online, LDR-S, LDR-H, LDR Online, TLA, TLA Online, Word ADA, Word ADA Online, CapCentral, CapCentral Online"] * 5
 })
 
 default_timeoff = pd.DataFrame({
@@ -346,7 +355,6 @@ if st.sidebar.button("🔄 Reset to Default Tables", use_container_width=True):
     st.session_state.timeoff_data = default_timeoff.copy()
     st.session_state.locations_data = default_locations.copy()
     st.session_state.wfh_data = default_wfh.copy()
-    
     st.success("All tables have been reset to their defaults!")
     st.rerun()
 
@@ -362,7 +370,6 @@ if generate_btn:
             target_month,
             session_mode
         )
-
         st.subheader(f"Generated Schedule for {calendar.month_name[target_month]} {target_year}")
 
         if not schedule_df.empty:
@@ -370,14 +377,24 @@ if generate_btn:
             st.success(f"✅ Schedule successfully generated in **{mode_text}**!")
             for w in warnings:
                 st.warning(w)
-            
+
             st.dataframe(schedule_df, use_container_width=True, hide_index=True)
             st.download_button("📥 Download as CSV", schedule_df.to_csv(index=False).encode('utf-8'), f"Training_Schedule_{target_year}_{target_month}.csv", "text/csv")
 
-            st.markdown("### ⚖️ Instructor Workload Distribution")
-            workload_summary = schedule_df['Instructor'].value_counts().reset_index()
-            workload_summary.columns = ['Instructor', 'Classes Scheduled']
-            st.dataframe(workload_summary, hide_index=True)
+            # --- Distribution Summaries ---
+            sum_col1, sum_col2 = st.columns(2)
+            with sum_col1:
+                st.markdown("### ⚖️ Instructor Workload Distribution")
+                workload_summary = schedule_df['Instructor'].value_counts().reset_index()
+                workload_summary.columns = ['Instructor', 'Classes Scheduled']
+                st.dataframe(workload_summary, hide_index=True)
+
+            with sum_col2:
+                st.markdown("### 📊 Daily Class Distribution")
+                daily_summary = schedule_df['Date'].value_counts().reset_index()
+                daily_summary.columns = ['Date', 'Classes Scheduled']
+                daily_summary = daily_summary.sort_values(by='Date')
+                st.dataframe(daily_summary, hide_index=True)
         else:
             if warnings:
                 for w in warnings:
