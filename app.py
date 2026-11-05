@@ -40,21 +40,65 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     cal = calendar.Calendar()
     month_days = [d for d in cal.itermonthdates(target_year, target_month) if d.month == target_month]
 
+    # --- Safe parsing of the Time Off table ---
     try:
-        time_off_df = time_off_df.copy()
-        time_off_df['StartDate'] = pd.to_datetime(time_off_df['Start Date'], errors='coerce').dt.date
-        time_off_df['EndDate'] = pd.to_datetime(time_off_df['End Date'], errors='coerce').dt.date
-        time_off_df['Start Time'] = time_off_df['Start Time'].astype(str)
-        time_off_df['End Time'] = time_off_df['End Time'].astype(str)
-        time_off_df.dropna(subset=['StartDate', 'EndDate'], inplace=True)
-    except Exception:
-        return pd.DataFrame(), ["Error parsing dates in the Time Off & Holidays data. Please ensure format is YYYY-MM-DD."]
+        time_off_clean = time_off_df.dropna(how='all').copy()
+        if not time_off_clean.empty:
+            time_off_clean['StartDate'] = pd.to_datetime(time_off_clean['Start Date'], errors='coerce').dt.date
+            time_off_clean['EndDate'] = pd.to_datetime(time_off_clean['End Date'], errors='coerce').dt.date
+            
+            # Standardize time strings (strip, uppercase, replace potential comma mistakes)
+            time_off_clean['Start Time'] = time_off_clean['Start Time'].astype(str).str.strip().str.upper().str.replace(',', ':')
+            time_off_clean['End Time'] = time_off_clean['End Time'].astype(str).str.strip().str.upper().str.replace(',', ':')
+            time_off_clean.dropna(subset=['StartDate', 'EndDate'], inplace=True)
+        else:
+            time_off_clean = pd.DataFrame(columns=['Title', 'Start Date', 'End Date', 'Start Time', 'End Time', 'Instructor', 'StartDate', 'EndDate'])
+    except Exception as e:
+        return pd.DataFrame(), [f"Error parsing dates in the Time Off & Holidays data: {str(e)}. Please ensure format is YYYY-MM-DD."]
 
+    # --- Separate General Holidays (All-Day Blocks) and General Partial-Day Meetings ---
     general_holidays = set()
-    for _, row in time_off_df[time_off_df['Instructor'].isnull() | (time_off_df['Instructor'] == '')].iterrows():
-        if pd.notna(row['StartDate']) and pd.notna(row['EndDate']):
-            for i in range((row['EndDate'] - row['StartDate']).days + 1):
-                general_holidays.add(row['StartDate'] + timedelta(days=i))
+    general_partial_conflicts = [] # Will hold (date, start_dt, end_dt) for team-wide partial events
+
+    for _, row in time_off_clean.iterrows():
+        # Check if it has no instructor assigned (applies to everyone)
+        inst_val = str(row['Instructor']).strip().lower()
+        is_general_event = pd.isna(row['Instructor']) or inst_val in ['', 'nan', 'none']
+        
+        if is_general_event:
+            has_times = pd.notna(row['Start Time']) and row['Start Time'] not in ['', 'NAN'] and \
+                        pd.notna(row['End Time']) and row['End Time'] not in ['', 'NAN']
+            
+            if not has_times:
+                # All-day general holiday
+                if pd.notna(row['StartDate']) and pd.notna(row['EndDate']):
+                    for i in range((row['EndDate'] - row['StartDate']).days + 1):
+                        general_holidays.add(row['StartDate'] + timedelta(days=i))
+            else:
+                # Partial-day general conflict (e.g. "Team Meeting")
+                for i in range((row['EndDate'] - row['StartDate']).days + 1):
+                    current_date = row['StartDate'] + timedelta(days=i)
+                    try:
+                        # Helper to normalize e.g. "9:00AM" to parseable formats
+                        def parse_custom_time(t_str):
+                            t_str = t_str.replace(" ", "")
+                            if t_str.endswith("AM") or t_str.endswith("PM"):
+                                time_part = t_str[:-2]
+                                ampm = t_str[-2:]
+                                if ":" not in time_part:
+                                    time_part = f"{int(time_part)}:00"
+                                return datetime.strptime(f"{time_part} {ampm}", "%I:%M %Y" if len(time_part.split(':')[-1]) > 2 else "%I:%M %p").time()
+                            raise ValueError
+                        
+                        s_time = parse_custom_time(row['Start Time'])
+                        e_time = parse_custom_time(row['End Time'])
+                        
+                        s_dt = datetime.combine(current_date, s_time)
+                        e_dt = datetime.combine(current_date, e_time)
+                        general_partial_conflicts.append((current_date, s_dt, e_dt))
+                    except Exception:
+                        warnings.append(f"Failed to parse time '{row['Start Time']}' or '{row['End Time']}' for general meeting '{row['Title']}'. Use format '09:00 AM'.")
+
 
     if is_session_mode:
         allowed_weekdays = [0, 1, 2, 3, 4]
@@ -191,24 +235,39 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                                 if str(default_location).strip().lower() == 'online':
                                     continue
 
-                        # --- Instructor Availability Check with 30-Min Buffer ---
+                                                # --- Instructor Availability Check with 30-Min Buffer ---
                         candidate_start_buffered = start_time - timedelta(minutes=30)
                         candidate_end_buffered = end_time + timedelta(minutes=30)
 
                         is_busy = False
+                        
+                        # 1. Check general/group-wide partial-day conflicts first (e.g., Team Meetings)
+                        for conflict_date, s_dt, e_dt in general_partial_conflicts:
+                            if test_date == conflict_date:
+                                # Apply buffer to the team meeting as well for instructor sanity
+                                if check_overlap(candidate_start_buffered, candidate_end_buffered, s_dt - timedelta(minutes=30), e_dt + timedelta(minutes=30)):
+                                    is_busy = True
+                                    break
+                        
+                        if is_busy:
+                            continue
+
+                        # 2. Check individual busy times
                         if any(check_overlap(candidate_start_buffered, candidate_end_buffered, bs, be) for bs, be in instructor_availability.get(instructor_name, [])):
                             is_busy = True
                             continue
 
-                        instructor_time_off = time_off_df[time_off_df['Instructor'] == instructor_full_name]
+                        # 3. Check individual time off conflicts
+                        instructor_time_off = time_off_clean[time_off_clean['Instructor'] == instructor_full_name]
                         for _, leave in instructor_time_off.iterrows():
                             if leave['StartDate'] <= test_date <= leave['EndDate']:
                                 if pd.isna(leave['Start Time']) or leave['Start Time'] in ['nan', '']:
                                     is_busy = True
                                     break
                                 try:
-                                    leave_start = datetime.strptime(leave['Start Time'], '%I:%M %p').time()
-                                    leave_end = datetime.strptime(leave['End Time'], '%I:%M %p').time()
+                                    # Fallback helper parsing for individual leave
+                                    leave_start = datetime.strptime(leave['Start Time'].replace(" ", ""), '%I:%M%p').time()
+                                    leave_end = datetime.strptime(leave['End Time'].replace(" ", ""), '%I:%M%p').time()
                                     leave_start_dt = datetime.combine(test_date, leave_start)
                                     leave_end_dt = datetime.combine(test_date, leave_end)
                                     if check_overlap(candidate_start_buffered, candidate_end_buffered, leave_start_dt, leave_end_dt):
