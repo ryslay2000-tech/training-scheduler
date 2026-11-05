@@ -401,7 +401,7 @@ with colB:
 st.sidebar.header("🗓️ Scheduling Controls")
 session_mode = st.sidebar.toggle("Session Mode (Mon-Fri)", value=True, help="ON = Session (Mon-Fri). OFF = Interim (Tue-Thu).")
 target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
-target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=5, format_func=lambda x: calendar.month_name[x])
+target_month = st.sidebar.selectbox("Target Month", range(1, 13), index=11, format_func=lambda x: calendar.month_name[x])
 
 # Max Daily Class Cap Slider
 max_daily_cap = st.sidebar.slider("Max Classes per Day", min_value=1, max_value=6, value=3, help="Enforces a maximum threshold of classes scheduled on any single day.")
