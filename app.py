@@ -271,11 +271,11 @@ default_roster = pd.DataFrame({
 })
 
 default_timeoff = pd.DataFrame({
-    "Title": ["New Years Day", "MLK Day"],
-    "Start Date": ["2027-01-01", "2026-01-18"],
-    "End Date": ["2026-01-01", "2026-01-18"],
-    "Start Time": ["", ""],
-    "End Time": ["", ""],
+    "Title": ["Christmas", "Team Meeting", "Team Meeting", "Team Meeting"],
+    "Start Date": ["2026-12-21", "2026-12-01", "2026-12-08", "2026-12-15"],
+    "End Date": ["2026-12-31", "2026-12-01"],
+    "Start Time": ["", "(9, 0)", "(9, 0)", "(9, 0)"],
+    "End Time": ["", "(10, 30)", "(10, 30)", "(10, 30)"],
     "Instructor": ["", ""]
 })
 
