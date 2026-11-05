@@ -317,7 +317,7 @@ st.markdown("Edit your data, select your scheduling mode, then click generate.")
 
 # --- Default Fallback Data Definitions ---
 default_catalog = pd.DataFrame({
-    "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "LASSO", "LASSO", "Word ADA", "Word ADA Online", "CapCentral", "CapCentral Online", "Adobe ADA", "Adobe ADA Online"],
+    "Title": ["CMS", "CMS Online", "TLIS", "TLIS Online", "LMS-H", "LMS-S", "LMS-C", "LMS Online", "LMS-C Online", "LDR-S", "LDR-H", "LDR Online", "LASSO", "LASSO Online", "Word ADA", "Word ADA Online", "CapCentral", "CapCentral Online", "Adobe ADA", "Adobe ADA Online"],
     "Frequency": [8,4,8,4,8,8,4,4,2,8,8,4,8,4,4,2,1,1,1,1],
     "Duration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0],
     "Default Location": ["SHB 835", "Online", "SHB 865", "Online", "JHR G11", "SHB 835", "SHB 865", "Online", "Online", "SHB 865", "JHR G10", "Online", "JHR G11", "Online", "JHR G10", "Online", "SHB 835", "Online", "SHB 835", "Online"]
@@ -333,8 +333,8 @@ default_timeoff = pd.DataFrame({
     "Title": ["Christmas", "Team Meeting", "Team Meeting", "Team Meeting"],
     "Start Date": ["2026-12-21", "2026-12-01", "2026-12-08", "2026-12-15"],
     "End Date": ["2026-12-31", "2026-12-01", "2026-12-08", "2026-12-15"],
-    "Start Time": ["", "9, 0", "9, 0", "9, 0"],
-    "End Time": ["", "10, 30", "10, 30", "10, 30"],
+    "Start Time": ["", "09:00 AM", "09:00 AM", "09:00 AM"],
+    "End Time": ["", "10:30 AM", "10:30 AM", "10:30 AM"],
     "Instructor": ["", "", "", ""]
 })
 
