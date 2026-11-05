@@ -276,7 +276,7 @@ default_timeoff = pd.DataFrame({
     "End Date": ["2026-12-31", "2026-12-01"],
     "Start Time": ["", "(9, 0)", "(9, 0)", "(9, 0)"],
     "End Time": ["", "(10, 30)", "(10, 30)", "(10, 30)"],
-    "Instructor": ["", ""]
+    "Instructor": ["", "", "", ""]
 })
 
 default_locations = pd.DataFrame({"Locations": ["SHB 835", "SHB 865", "JHR G10", "JHR G11", "Online"]})
