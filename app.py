@@ -116,7 +116,7 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
     location_availability = defaultdict(list)
     instructor_availability = defaultdict(list)
     class_day_tracker = defaultdict(set)
-    class_week_tracker = defaultdict(set)
+    class_week_counter = defaultdict(lambda: defaultdict(int)) # Track occurrences per week
     RESTRICTED_CMS_LMS_CLASSES = {"LMS-S", "LMS-H", "LMS-C", "LMS-C Online","LMS Online", "CMS Online", "CMS"}
     instructor_restricted_tracker = defaultdict(set)
     
