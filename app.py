@@ -170,22 +170,38 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
             if session_scheduled:
                 break
 
-            for test_date in candidate_workdays:
+        for test_date in candidate_workdays:
                 if session_scheduled:
                     break
+
+                # 1. Exact same day check
                 if test_date in class_day_tracker[class_name]:
                     continue
-                if class_frequency <= 4 and test_date.isocalendar() in class_week_tracker.get(class_name, []):
+
+                # 2. Consecutive days check (prevents scheduling back-to-back days)
+                # If a class is on Tuesday, this prevents scheduling it on Monday or Wednesday
+                has_consecutive_conflict = any(
+                    abs((test_date - scheduled_date).days) <= 1 
+                    for scheduled_date in class_day_tracker[class_name]
+                )
+                if has_consecutive_conflict:
                     continue
 
-                # Hard Cap & Strict Daily Balance: Avoid scheduling on busy days if lighter days are available
+                # 3. Same-week distribution check
+                week_key = (test_date.year, test_date.isocalendar().week)
+                # Dynamic cap: e.g., freq <= 4 gets max 1/week; freq 8 gets max 2/week
+                max_classes_per_week = max(1, (class_frequency + 3) // 4)
+                if class_week_counter[class_name][week_key] >= max_classes_per_week:
+                    continue
+
+                # 4. Hard Cap & Strict Daily Balance
                 if daily_class_tracker[test_date] >= max_daily_cap:
                     continue
-
                 if strict_balance:
                     min_daily_load = min(daily_class_tracker.values()) if daily_class_tracker else 0
                     if daily_class_tracker[test_date] >= (min_daily_load + 1):
                         continue
+
 
                 preferred_start_times = [(9, 30), (10, 0), (13, 0), (14, 0)]
                 random.shuffle(preferred_start_times)
