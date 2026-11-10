@@ -303,10 +303,12 @@ def generate_training_schedule(class_catalog_df, instructor_roster_df, time_off_
                             })
                             instructor_availability[instructor_name].append((candidate_start_buffered, candidate_end_buffered))
                             location_availability[default_location].append((start_time, end_time))
+                                                        # Record the schedule
                             class_day_tracker[class_name].add(test_date)
-                            class_week_tracker[class_name].add(test_date.isocalendar())
+                            class_week_counter[class_name][(test_date.year, test_date.isocalendar().week)] += 1
                             instructor_load_count[instructor_name] += 1
                             daily_class_tracker[test_date] += 1
+
 
                             if class_name in RESTRICTED_CMS_LMS_CLASSES:
                                 instructor_restricted_tracker[instructor_name].add(test_date)
